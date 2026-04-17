@@ -92,7 +92,7 @@ attrs==25.4.0
     #   pytest-docker
     #   referencing
     #   zeep
-authlib==1.6.9
+authlib==1.6.11
     # via
     #   acryl-datahub
     #   confluent-kafka
