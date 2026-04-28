@@ -388,6 +388,22 @@ class FivetranSourceConfig(StatefulIngestionConfigBase, DatasetSourceConfigMixin
             "via `destination_to_platform_instance` always win on conflict."
         ),
     )
+    log_source: Literal["log_database", "rest_api"] = pydantic.Field(
+        default="log_database",
+        description=(
+            "Where to read the Fivetran log from:\n"
+            "  - `log_database` (default): the existing path — read SQL log "
+            "tables from the destination warehouse the Fivetran Platform "
+            "Connector delivers them to. Requires `fivetran_log_config`.\n"
+            "  - `rest_api`: read everything via the Fivetran REST API "
+            "(`GET /v1/connections`, `/schemas`, `/sync_history`, `/users`, "
+            "`/destinations`). No database connection needed; only "
+            "`api_config` is required. Recommended for hybrid setups where "
+            "data is split across destinations of different types, or when "
+            "you don't want to set up a Snowflake catalog-linked database "
+            "for Managed Data Lake ingestion."
+        ),
+    )
 
     # Configuration for stateful ingestion
     stateful_ingestion: Optional[StatefulStaleMetadataRemovalConfig] = pydantic.Field(
@@ -439,3 +455,14 @@ class FivetranSourceConfig(StatefulIngestionConfigBase, DatasetSourceConfigMixin
         7,
         description="The number of days to look back when extracting connectors' sync history.",
     )
+
+    @model_validator(mode="after")
+    def validate_log_source_credentials(self) -> "FivetranSourceConfig":
+        if self.log_source == "rest_api":
+            if self.api_config is None:
+                raise ValueError(
+                    "log_source='rest_api' requires `api_config` (Fivetran API "
+                    "key + secret) to be configured. The REST mode does not "
+                    "use the destination database connection."
+                )
+        return self
