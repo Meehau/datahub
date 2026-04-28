@@ -30,7 +30,7 @@ class TestFivetranDestinationDetailsParsing:
     def test_managed_data_lake_response_parses(self):
         # Real-shape response for an MDL destination with Glue toggle on.
         raw = {
-            "id": "interval_unconstitutional",
+            "id": "test_destination_id",
             "service": "managed_data_lake",
             "region": "AWS_US_EAST_1",
             "group_id": "g_123",
@@ -45,7 +45,7 @@ class TestFivetranDestinationDetailsParsing:
             "future_field_we_dont_know_about": {"x": 1},
         }
         details = FivetranDestinationDetails.model_validate(raw)
-        assert details.id == "interval_unconstitutional"
+        assert details.id == "test_destination_id"
         assert details.service == "managed_data_lake"
         assert details.config.bucket == "my-lake-bucket"
         assert details.config.region == "us-east-1"

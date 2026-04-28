@@ -110,7 +110,7 @@ class FivetranDestinationDetails(BaseModel):
 
     Sample response for a Managed Data Lake destination:
     {
-      "id": "interval_unconstitutional",
+      "id": "test_destination_id",
       "service": "managed_data_lake",
       "region": "AWS_US_EAST_1",
       "group_id": "...",

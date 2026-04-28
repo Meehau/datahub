@@ -41,16 +41,16 @@ def mock_service_account_credentials():
 default_connector_query_results = [
     {
         "connection_id": "calendar_elected",
-        "connecting_user_id": "reapply_phone",
+        "connecting_user_id": "test_user_id",
         "connector_type_id": "postgres",
         "connection_name": "postgres",
         "paused": False,
         "sync_frequency": 1440,
-        "destination_id": "interval_unconstitutional",
+        "destination_id": "test_destination_id",
     },
     {
         "connection_id": "my_confluent_cloud_connector_id",
-        "connecting_user_id": "reapply_phone",
+        "connecting_user_id": "test_user_id",
         "connector_type_id": "confluent_cloud",
         "connection_name": "confluent_cloud",
         "paused": False,
@@ -145,7 +145,7 @@ def _build_query_results_handler(database: str, schema: str) -> Callable[..., Li
         if query == fivetran_log_query.get_users_query():
             return [
                 {
-                    "user_id": "reapply_phone",
+                    "user_id": "test_user_id",
                     "given_name": "Shubham",
                     "family_name": "Jagtap",
                     "email": "abc.xyz@email.com",
@@ -600,7 +600,7 @@ def test_fivetran_with_snowflake_dest(pytestconfig, tmp_path):
                         },
                         "destination_patterns": {
                             "allow": [
-                                "interval_unconstitutional",
+                                "test_destination_id",
                                 "my_confluent_cloud_connector_id",
                             ]
                         },
@@ -672,7 +672,7 @@ def test_fivetran_with_snowflake_dest_and_null_connector_user(pytestconfig, tmp_
                 "connection_name": "postgres",
                 "paused": False,
                 "sync_frequency": 1440,
-                "destination_id": "interval_unconstitutional",
+                "destination_id": "test_destination_id",
             },
             {
                 "connection_id": "my_confluent_cloud_connector_id",
@@ -681,7 +681,7 @@ def test_fivetran_with_snowflake_dest_and_null_connector_user(pytestconfig, tmp_
                 "connection_name": "confluent_cloud",
                 "paused": False,
                 "sync_frequency": 1440,
-                "destination_id": "interval_unconstitutional",
+                "destination_id": "test_destination_id",
             },
         ]
 
@@ -715,7 +715,7 @@ def test_fivetran_with_snowflake_dest_and_null_connector_user(pytestconfig, tmp_
                         },
                         "destination_patterns": {
                             "allow": [
-                                "interval_unconstitutional",
+                                "test_destination_id",
                             ]
                         },
                         "sources_to_platform_instance": {
@@ -823,7 +823,7 @@ def test_fivetran_with_managed_data_lake_dest(pytestconfig, tmp_path):
                         },
                         "destination_patterns": {
                             "allow": [
-                                "interval_unconstitutional",
+                                "test_destination_id",
                                 "my_confluent_cloud_connector_id",
                             ]
                         },
@@ -919,7 +919,7 @@ def test_fivetran_with_managed_data_lake_iceberg_rest_dest(
                         },
                         "destination_patterns": {
                             "allow": [
-                                "interval_unconstitutional",
+                                "test_destination_id",
                                 "my_confluent_cloud_connector_id",
                             ]
                         },
@@ -998,7 +998,7 @@ def test_fivetran_with_hybrid_destination_discovery(pytestconfig, tmp_path):
     connector_query_results = [
         {
             "connection_id": "calendar_elected",
-            "connecting_user_id": "reapply_phone",
+            "connecting_user_id": "test_user_id",
             "connector_type_id": "postgres",
             "connection_name": "postgres",
             "paused": False,
@@ -1007,7 +1007,7 @@ def test_fivetran_with_hybrid_destination_discovery(pytestconfig, tmp_path):
         },
         {
             "connection_id": "my_confluent_cloud_connector_id",
-            "connecting_user_id": "reapply_phone",
+            "connecting_user_id": "test_user_id",
             "connector_type_id": "confluent_cloud",
             "connection_name": "confluent_cloud",
             "paused": False,

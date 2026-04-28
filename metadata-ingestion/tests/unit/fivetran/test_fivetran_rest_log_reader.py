@@ -45,7 +45,7 @@ class TestResponseModelParsing:
                         "paused": False,
                         "sync_frequency": 1440,
                         "group_id": "g1",
-                        "connected_by": "reapply_phone",
+                        "connected_by": "test_user_id",
                     }
                 ],
                 "next_cursor": "abc123",
@@ -98,7 +98,7 @@ class TestResponseModelParsing:
         raw = {
             "items": [
                 {
-                    "id": "reapply_phone",
+                    "id": "test_user_id",
                     "email": "shubham@example.com",
                     "given_name": "Shubham",
                     "family_name": "Jagtap",
@@ -107,7 +107,7 @@ class TestResponseModelParsing:
             "next_cursor": None,
         }
         parsed = FivetranListUsersResponse.model_validate(raw)
-        assert parsed.items[0].id == "reapply_phone"
+        assert parsed.items[0].id == "test_user_id"
         assert parsed.items[0].email == "shubham@example.com"
 
     def test_sync_history(self):

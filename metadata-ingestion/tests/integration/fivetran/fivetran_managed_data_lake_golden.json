@@ -61,7 +61,7 @@
                 "connector_type": "postgres",
                 "paused": "False",
                 "sync_frequency": "1440",
-                "destination_id": "interval_unconstitutional",
+                "destination_id": "test_destination_id",
                 "source.platform": "postgres",
                 "source.env": "PROD",
                 "destination.platform": "managed_data_lake",
