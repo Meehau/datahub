@@ -82,3 +82,48 @@ class FivetranConnectionDetails(BaseModel):
         }
     }
     """
+
+
+class FivetranDestinationConfig(BaseModel):
+    """Destination-level config returned by `GET /v1/destinations/{id}`.
+
+    The shape varies by `service` — only fields useful for URN construction
+    are typed explicitly; the rest are tolerated via `extra='ignore'`.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    # Common across destinations (most expose at least one of these).
+    database: Optional[str] = None  # Snowflake / Databricks
+    project_id: Optional[str] = None  # BigQuery
+    catalog: Optional[str] = None  # Databricks Unity
+
+    # Managed Data Lake fields.
+    bucket: Optional[str] = None
+    prefix_path: Optional[str] = None
+    region: Optional[str] = None
+    table_format: Optional[str] = None  # "ICEBERG" / "DELTA"
+
+
+class FivetranDestinationDetails(BaseModel):
+    """Subset of `GET /v1/destinations/{id}` fields needed for URN routing.
+
+    Sample response for a Managed Data Lake destination:
+    {
+      "id": "interval_unconstitutional",
+      "service": "managed_data_lake",
+      "region": "AWS_US_EAST_1",
+      "group_id": "...",
+      "setup_status": "CONNECTED",
+      "config": { "bucket": "...", "prefix_path": "fivetran", ... }
+    }
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    service: str  # "snowflake" | "bigquery" | "databricks" | "managed_data_lake" | ...
+    region: Optional[str] = None
+    group_id: Optional[str] = None
+    setup_status: Optional[str] = None
+    config: FivetranDestinationConfig = FivetranDestinationConfig()
