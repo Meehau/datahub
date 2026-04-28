@@ -37,7 +37,11 @@ from datahub.ingestion.source.fivetran.config import (
 )
 from datahub.ingestion.source.fivetran.data_classes import Connector, Job
 from datahub.ingestion.source.fivetran.fivetran_log_api import FivetranLogAPI
+from datahub.ingestion.source.fivetran.fivetran_log_rest_reader import (
+    FivetranLogRestReader,
+)
 from datahub.ingestion.source.fivetran.fivetran_rest_api import FivetranAPIClient
+from datahub.ingestion.source.fivetran.log_reader import FivetranLogReader
 from datahub.ingestion.source.fivetran.response_models import (
     FivetranConnectionDetails,
     FivetranDestinationDetails,
@@ -100,12 +104,18 @@ class FivetranSource(StatefulIngestionSourceBase):
         super().__init__(config, ctx)
         self.config = config
         self.report = FivetranSourceReport()
-        self.audit_log = FivetranLogAPI(self.config.fivetran_log_config)
+        self.audit_log: FivetranLogReader = self._build_log_reader()
         self.api_client: Optional[FivetranAPIClient] = None
         self._connection_details_cache: Dict[str, FivetranConnectionDetails] = {}
 
         if self.config.api_config:
             self.api_client = FivetranAPIClient(self.config.api_config)
+
+    def _build_log_reader(self) -> FivetranLogReader:
+        if self.config.log_source == "rest_api":
+            assert self.config.api_config is not None  # validated upstream
+            return FivetranLogRestReader(self.config.api_config)
+        return FivetranLogAPI(self.config.fivetran_log_config)
 
     def _extend_lineage(self, connector: Connector, datajob: DataJob) -> Dict[str, str]:
         input_dataset_urn_list: List[Union[str, DatasetUrn]] = []
