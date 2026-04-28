@@ -21,6 +21,7 @@ from datahub.ingestion.source.fivetran.response_models import (
     FivetranConnectionSchemas,
     FivetranListConnectionsResponse,
     FivetranListedConnection,
+    FivetranListedUser,
     FivetranListUsersResponse,
     FivetranSchema,
     FivetranSyncHistoryResponse,
@@ -472,3 +473,49 @@ class TestGetAllowedConnectorsListRest:
             syncs_interval=7,
         )
         assert {c.connector_id for c in connectors} == {"keep"}
+
+
+class TestGetUserEmailRest:
+    def test_returns_cached_email(self):
+        api = MagicMock()
+        api.list_users.return_value = iter(
+            [
+                FivetranListedUser(id="u1", email="u1@x"),
+                FivetranListedUser(id="u2", email="u2@x"),
+            ]
+        )
+        # Mock /v1/groups list (used for group discovery).
+        groups_resp = MagicMock()
+        groups_resp.json.return_value = {
+            "code": "Success",
+            "data": {"items": [{"id": "g1"}]},
+        }
+        groups_resp.raise_for_status = MagicMock()
+        with patch.object(
+            api._session,
+            "get",
+            return_value=groups_resp,
+        ):
+            reader = FivetranLogRestReader.__new__(FivetranLogRestReader)
+            reader.api_client = api
+            reader._user_email_cache = {}
+            reader._group_ids = None  # force discovery once
+            assert reader.get_user_email("u1") == "u1@x"
+            # Second call — cached, no extra REST call needed
+            assert reader.get_user_email("u2") == "u2@x"
+        # `list_users` should only have been called once (cache populated bulk)
+        assert api.list_users.call_count == 1
+
+    def test_returns_none_for_missing_user(self):
+        api = MagicMock()
+        api.list_users.return_value = iter([])
+        reader = FivetranLogRestReader.__new__(FivetranLogRestReader)
+        reader.api_client = api
+        reader._user_email_cache = {}
+        reader._group_ids = ["g1"]
+        assert reader.get_user_email("not_in_account") is None
+
+    def test_returns_none_for_none_input(self):
+        reader = FivetranLogRestReader.__new__(FivetranLogRestReader)
+        reader._user_email_cache = {}
+        assert reader.get_user_email(None) is None
