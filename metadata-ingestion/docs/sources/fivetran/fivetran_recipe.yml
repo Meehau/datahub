@@ -1,6 +1,13 @@
 source:
   type: fivetran
   config:
+    # Optional - Choose how to read Fivetran log data:
+    #   "log_database" (default) — read SQL log tables from the destination
+    #     warehouse. Requires fivetran_log_config below.
+    #   "rest_api" — read everything via the Fivetran REST API. Requires
+    #     api_config; no destination database connection needed.
+    # log_source: rest_api
+
     # Optional - When True, fetch each destination's `service` (managed_data_lake /
     # snowflake / bigquery / databricks / ...) via the Fivetran REST API and route
     # URN construction accordingly. Required for hybrid deployments where the

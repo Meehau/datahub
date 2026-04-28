@@ -152,6 +152,34 @@ Discovery results are cached per-ingest, so each unique `destination_id` trigger
 
 **Limitations of REST discovery for Managed Data Lake:** for MDL destinations discovered via REST, the connector defaults to `catalog_type: glue`. If your MDL uses a non-Glue catalog (Iceberg REST / Polaris / Unity / BigLake), declare `managed_data_lake_destination_config` explicitly with the right `catalog_type` — discovery alone can't infer the catalog backing reliably.
 
+#### Choosing between `log_database` and `rest_api` modes
+
+The connector supports two log-reading strategies. Pick one with `log_source`:
+
+| Mode                     | When to use                                                                                                                                                                                                     | Required config       |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| `log_database` (default) | Standard setup — Fivetran Platform Connector delivers logs to a destination warehouse you already query (Snowflake, BigQuery, Databricks, MDL via Snowflake CLD).                                               | `fivetran_log_config` |
+| `rest_api`               | Hybrid setups (log + data on different destination types), Polaris/MDL deployments where you don't want to set up a Snowflake catalog-linked database, or any case where minimising credential surface matters. | `api_config`          |
+
+REST mode reads `connections`, `schemas` (for table+column lineage), `sync_history`, `users`, and `destinations` directly via the Fivetran API. No database connection. URN platform routing happens automatically per destination via the same REST endpoint.
+
+```yaml
+source:
+  type: fivetran
+  config:
+    log_source: rest_api
+    api_config:
+      api_key: "${FIVETRAN_API_KEY}"
+      api_secret: "${FIVETRAN_API_SECRET}"
+    # destination_to_platform_instance still works as a per-destination override.
+    destination_to_platform_instance:
+      g1:
+        platform_instance: "polaris_us_west"
+        env: PROD
+```
+
+**Tradeoffs:** REST mode makes one or more API calls per connector instead of bulk SQL queries. For accounts with hundreds of connectors, expect noticeably more API requests during ingest (typically still well under Fivetran's per-minute rate limits). Sync-history detail is constrained to what the REST endpoint exposes — generally sufficient for run-status MCEs.
+
 #### Fivetran REST API Configuration
 
 The Fivetran REST API configuration is **required** for Google Sheets connectors and optional for other use cases. It provides access to connection details that aren't available in the Platform Connector logs.
