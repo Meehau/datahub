@@ -5,12 +5,20 @@ copy the saved /tmp/fv_*.json contents into the inline fixtures or load
 them from `tests/unit/fivetran/fixtures/` if your fixtures get large.
 """
 
+from unittest.mock import MagicMock, patch
+
+from datahub.ingestion.source.fivetran.config import FivetranAPIConfig
+from datahub.ingestion.source.fivetran.fivetran_rest_api import FivetranAPIClient
 from datahub.ingestion.source.fivetran.response_models import (
     FivetranConnectionSchemas,
     FivetranListConnectionsResponse,
     FivetranListUsersResponse,
     FivetranSyncHistoryResponse,
 )
+
+
+def _make_client():
+    return FivetranAPIClient(FivetranAPIConfig(api_key="k", api_secret="s"))
 
 
 class TestResponseModelParsing:
@@ -125,3 +133,79 @@ class TestResponseModelParsing:
             ]
         }
         FivetranListConnectionsResponse.model_validate(raw)  # must not raise
+
+
+class TestListConnections:
+    def test_single_page(self):
+        client = _make_client()
+        resp = MagicMock()
+        resp.json.return_value = {
+            "code": "Success",
+            "data": {
+                "items": [
+                    {
+                        "id": "c1",
+                        "schema": "s",
+                        "service": "postgres",
+                        "paused": False,
+                        "sync_frequency": 1440,
+                        "group_id": "g",
+                        "connected_by": None,
+                    }
+                ],
+                "next_cursor": None,
+            },
+        }
+        resp.raise_for_status = MagicMock()
+        with patch.object(client._session, "get", return_value=resp):
+            result = list(client.list_connections(group_id="g"))
+        assert len(result) == 1
+        assert result[0].id == "c1"
+
+    def test_paginates_until_cursor_none(self):
+        client = _make_client()
+
+        def _page(_url, **kwargs):
+            cursor = kwargs.get("params", {}).get("cursor")
+            r = MagicMock()
+            if cursor is None:
+                r.json.return_value = {
+                    "code": "Success",
+                    "data": {
+                        "items": [
+                            {
+                                "id": "p1",
+                                "schema": "s",
+                                "service": "postgres",
+                                "paused": False,
+                                "sync_frequency": 1,
+                                "group_id": "g",
+                            }
+                        ],
+                        "next_cursor": "next1",
+                    },
+                }
+            elif cursor == "next1":
+                r.json.return_value = {
+                    "code": "Success",
+                    "data": {
+                        "items": [
+                            {
+                                "id": "p2",
+                                "schema": "s",
+                                "service": "postgres",
+                                "paused": False,
+                                "sync_frequency": 1,
+                                "group_id": "g",
+                            }
+                        ],
+                        "next_cursor": None,
+                    },
+                }
+            r.raise_for_status = MagicMock()
+            return r
+
+        with patch.object(client._session, "get", side_effect=_page) as mocked:
+            result = list(client.list_connections(group_id="g"))
+        assert [c.id for c in result] == ["p1", "p2"]
+        assert mocked.call_count == 2

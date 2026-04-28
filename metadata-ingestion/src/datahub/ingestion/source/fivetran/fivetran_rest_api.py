@@ -1,5 +1,5 @@
 import logging
-from typing import Dict
+from typing import Dict, Iterator, Optional
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -11,6 +11,8 @@ from datahub.ingestion.source.fivetran.config import (
 from datahub.ingestion.source.fivetran.response_models import (
     FivetranConnectionDetails,
     FivetranDestinationDetails,
+    FivetranListConnectionsResponse,
+    FivetranListedConnection,
 )
 
 logger = logging.getLogger(__name__)
@@ -142,3 +144,35 @@ class FivetranAPIClient:
         details = FivetranDestinationDetails.model_validate(payload["data"])
         self._destination_cache[destination_id] = details
         return details
+
+    def list_connections(
+        self, group_id: str, page_size: int = 100
+    ) -> Iterator[FivetranListedConnection]:
+        """Yield every connection in a Fivetran group, traversing pagination.
+
+        Cursor-based pagination follows Fivetran's standard contract: `data.next_cursor`
+        is the token for the next page; `None` ends iteration.
+        """
+        cursor: Optional[str] = None
+        while True:
+            params: Dict[str, object] = {"limit": page_size}
+            if cursor is not None:
+                params["cursor"] = cursor
+            resp = self._session.get(
+                f"{self.config.base_url}/v1/groups/{group_id}/connections",
+                params=params,
+                timeout=self.config.request_timeout_sec,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            if payload.get("code") != "Success":
+                raise ValueError(
+                    f"Fivetran API returned non-success code "
+                    f"{payload.get('code')!r} for list_connections "
+                    f"(group_id={group_id})"
+                )
+            page = FivetranListConnectionsResponse.model_validate(payload["data"])
+            yield from page.items
+            cursor = page.next_cursor
+            if cursor is None:
+                return
