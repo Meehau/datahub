@@ -44,7 +44,7 @@ def _build_snowflake_setup(
     )
 
     cfg = _make_cfg(
-        database="lh_source_fivetran_usw2",
+        database="mdl_log_db",
         log_schema="fivetran_metadata_test",
         preserve_case=preserve_case,
     )
@@ -65,7 +65,7 @@ class TestPreserveCaseSnowflakeBranch:
         # schema that doesn't exist in the catalog-linked database.
         _, query, use_db_sql = _build_snowflake_setup(monkeypatch, preserve_case=True)
 
-        assert use_db_sql == 'use database "lh_source_fivetran_usw2"'
+        assert use_db_sql == 'use database "mdl_log_db"'
         assert query.schema_clause == '"fivetran_metadata_test".'
 
     def test_preserve_case_false_uppercases_unquoted_identifiers(
@@ -76,7 +76,7 @@ class TestPreserveCaseSnowflakeBranch:
         # quoted. This is what existing Snowflake-warehouse recipes rely on.
         _, query, use_db_sql = _build_snowflake_setup(monkeypatch, preserve_case=False)
 
-        assert use_db_sql == 'use database "LH_SOURCE_FIVETRAN_USW2"'
+        assert use_db_sql == 'use database "MDL_LOG_DB"'
         assert query.schema_clause == '"FIVETRAN_METADATA_TEST".'
 
     def test_preserve_case_false_keeps_pre_quoted_identifier_unchanged(

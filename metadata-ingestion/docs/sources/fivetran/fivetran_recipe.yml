@@ -60,7 +60,7 @@ source:
       #   # Snowflake CLD coordinates (case-preserving)
       #   account_id: "abc48144"
       #   warehouse: "COMPUTE_WH"
-      #   database: "lh_source_fivetran_usw2"
+      #   database: "mdl_log_db"
       #   log_schema: "fivetran_metadata_<suffix>"
       #
       #   # Credentials

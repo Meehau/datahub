@@ -762,9 +762,7 @@ def test_fivetran_with_snowflake_dest_and_null_connector_user(pytestconfig, tmp_
 # `preserve_case=True`, so the catalog-linked database surfacing the log
 # retains the case of the underlying Glue/Iceberg schema instead of being
 # auto-uppercased.
-mdl_query_results = _build_query_results_handler(
-    "lh_source_fivetran_usw2", "fivetran_metadata_test"
-)
+mdl_query_results = _build_query_results_handler("mdl_log_db", "fivetran_metadata_test")
 
 
 @time_machine.travel(FROZEN_TIME, tick=False)
@@ -813,7 +811,7 @@ def test_fivetran_with_managed_data_lake_dest(pytestconfig, tmp_path):
                                 # Lowercase database/schema — the case-preserving
                                 # CLD identifiers that the legacy `.upper()`
                                 # path would have failed against.
-                                "database": "lh_source_fivetran_usw2",
+                                "database": "mdl_log_db",
                                 "log_schema": "fivetran_metadata_test",
                                 # `preserve_case` defaults to True for MDL.
                                 "catalog_type": "glue",
@@ -911,7 +909,7 @@ def test_fivetran_with_managed_data_lake_iceberg_rest_dest(
                                 "username": "test",
                                 "password": "test@123",
                                 "role": "testrole",
-                                "database": "lh_source_fivetran_usw2",
+                                "database": "mdl_log_db",
                                 "log_schema": "fivetran_metadata_test",
                                 "catalog_type": catalog_type,
                             },
@@ -969,7 +967,7 @@ def test_fivetran_managed_data_lake_destination_config():
         username="test",
         password="test@123",
         role="TESTROLE",
-        database="LH_SOURCE_FIVETRAN_USW2",
+        database="MDL_LOG_DB",
         log_schema="fivetran_metadata_test",
     )
     assert (
@@ -1031,7 +1029,7 @@ def test_fivetran_with_hybrid_destination_discovery(pytestconfig, tmp_path):
                 region="AWS_US_WEST_2",
                 group_id="g1",
                 setup_status="CONNECTED",
-                config=FivetranDestinationConfig(database="DATAHUB_COMMUNITY"),
+                config=FivetranDestinationConfig(database="ANALYTICS_DB"),
             )
         if destination_id == "mdl_dest":
             return FivetranDestinationDetails(

@@ -73,7 +73,7 @@ source:
         # Snowflake CLD coordinates
         account_id: "abc48144"
         warehouse: "COMPUTE_WH"
-        database: "lh_source_fivetran_usw2"
+        database: "mdl_log_db"
         log_schema: "fivetran_metadata_<suffix>"
 
         # Credentials
@@ -112,7 +112,7 @@ managed_data_lake_destination_config:
   # Snowflake CLD coordinates — the Fivetran log still lives in a CLD
   account_id: "abc48144"
   warehouse: "COMPUTE_WH"
-  database: "lh_source_fivetran_usw2"
+  database: "mdl_log_db"
   log_schema: "fivetran_metadata_<suffix>"
   username: "${SNOWFLAKE_USER}"
   password: "${SNOWFLAKE_PASS}"

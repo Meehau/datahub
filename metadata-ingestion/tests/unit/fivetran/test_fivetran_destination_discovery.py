@@ -62,13 +62,13 @@ class TestFivetranDestinationDetailsParsing:
             "config": {
                 "host": "abc.snowflakecomputing.com",
                 "port": 443,
-                "database": "DATAHUB_COMMUNITY",
+                "database": "ANALYTICS_DB",
                 "user": "fivetran_user",
             },
         }
         details = FivetranDestinationDetails.model_validate(raw)
         assert details.service == "snowflake"
-        assert details.config.database == "DATAHUB_COMMUNITY"
+        assert details.config.database == "ANALYTICS_DB"
         # bucket is None for non-MDL destinations
         assert details.config.bucket is None
 
@@ -235,10 +235,10 @@ class TestApplyDiscoveredDestination:
     def test_snowflake_service_sets_platform_and_database(self):
         base = PlatformDetail()  # no overrides
         result = FivetranSource.apply_discovered_destination(
-            base, _details("snowflake", database="DATAHUB_COMMUNITY")
+            base, _details("snowflake", database="ANALYTICS_DB")
         )
         assert result.platform == "snowflake"
-        assert result.database == "DATAHUB_COMMUNITY"
+        assert result.database == "ANALYTICS_DB"
 
     def test_bigquery_service_uses_project_id_as_database(self):
         base = PlatformDetail()
@@ -261,7 +261,7 @@ class TestApplyDiscoveredDestination:
         # not clobber it with the discovered service.
         base = PlatformDetail(platform="my_custom_warehouse", database="X")
         result = FivetranSource.apply_discovered_destination(
-            base, _details("snowflake", database="DATAHUB_COMMUNITY")
+            base, _details("snowflake", database="ANALYTICS_DB")
         )
         assert result.platform == "my_custom_warehouse"
         assert result.database == "X"
@@ -338,13 +338,13 @@ class TestResolveDestinationDetails:
                 region="X",
                 group_id="g",
                 setup_status="CONNECTED",
-                config=FivetranDestinationConfig(database="DATAHUB_COMMUNITY"),
+                config=FivetranDestinationConfig(database="ANALYTICS_DB"),
             )
         )
         src = _make_source_with_discovery(api_client=api_client)
         result = src.resolve_destination_details("dest_b")
         assert result.platform == "snowflake"
-        assert result.database == "DATAHUB_COMMUNITY"
+        assert result.database == "ANALYTICS_DB"
         api_client.get_destination_details_by_id.assert_called_once_with("dest_b")
 
     def test_rest_discovery_for_managed_data_lake(self):

@@ -22,7 +22,7 @@ def _mdl_config(**overrides: Any) -> ManagedDataLakeDestinationConfig:
         username="datahub",
         password="hunter2",
         warehouse="DATAHUB_WH",
-        database="LH_SOURCE_FIVETRAN_USW2",
+        database="MDL_LOG_DB",
         log_schema="fivetran_metadata_test",
     )
     base.update(overrides)
@@ -124,12 +124,13 @@ class TestManagedDataLakeUrnConstruction:
         # verbatim — no `fivetran_` prefix unlike the Glue catalog backing.
         details = PlatformDetail(platform="managed_data_lake", env="PROD")
         urn = FivetranSource.build_destination_urn(
-            destination_table="luma.event",
+            destination_table="events.page_views",
             destination_details=details,
             mdl_cfg=_mdl_config(catalog_type=catalog_type),
         )
         assert (
-            str(urn) == "urn:li:dataset:(urn:li:dataPlatform:iceberg,luma.event,PROD)"
+            str(urn)
+            == "urn:li:dataset:(urn:li:dataPlatform:iceberg,events.page_views,PROD)"
         )
 
     @pytest.mark.parametrize("catalog_type", ["iceberg_rest", "polaris"])

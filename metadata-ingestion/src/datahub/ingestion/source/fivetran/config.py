@@ -136,7 +136,7 @@ class ManagedDataLakeDestinationConfig(SnowflakeConnectionConfig):
     database: str = Field(
         description=(
             "The Snowflake catalog-linked database that surfaces the "
-            "Fivetran Platform Connector logs (e.g., `LH_SOURCE_FIVETRAN_USW2`)."
+            "Fivetran Platform Connector logs (e.g., `MDL_LOG_DB`)."
         )
     )
     log_schema: str = Field(
