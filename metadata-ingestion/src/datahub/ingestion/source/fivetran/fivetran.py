@@ -2,6 +2,9 @@ import logging
 from typing import ClassVar, Dict, Iterable, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
+import pydantic
+import requests
+
 import datahub.emitter.mce_builder as builder
 from datahub.api.entities.datajob import DataJob as DataJobV1
 from datahub.api.entities.dataprocess.dataprocess_instance import (
@@ -253,6 +256,18 @@ class FivetranSource(StatefulIngestionSourceBase):
     def _build_destination_urn(
         self, destination_table: str, destination_details: PlatformDetail
     ) -> DatasetUrn:
+        """Resolve the MDL config (declared or synthesized) and delegate to
+        `build_destination_urn`.
+
+        When MDL is discovered via REST without a declarative
+        `managed_data_lake_destination_config` block, this synthesizes a
+        stop-gap `ManagedDataLakeDestinationConfig` populated with sentinel
+        values on its Snowflake-connection fields. The synthesized object is
+        URN-construction-only and must not be passed anywhere else. The
+        cleaner long-term fix is to refactor `build_destination_urn` to take
+        `catalog_type` and `glue_database_prefix` as kwargs separately so that
+        no synthesis is needed; that's deferred to a future PR.
+        """
         declared_mdl = (
             self.config.fivetran_log_config.managed_data_lake_destination_config
         )
@@ -262,10 +277,17 @@ class FivetranSource(StatefulIngestionSourceBase):
             # MDL backings users must declare `managed_data_lake_destination_config`
             # explicitly because catalog_type can't be reliably inferred from
             # REST without inspecting Fivetran's Glue/Unity toggle fields.
+            #
+            # Synthesize a Glue-defaulted MDL config for URN construction only.
+            # These sentinel values for Snowflake-connection fields (account_id,
+            # database, log_schema) are placeholders — `build_destination_urn` only
+            # reads `catalog_type` and `glue_database_prefix`. Do not read the other
+            # fields off this object. (Long-term cleanup: refactor
+            # build_destination_urn to take only the URN-relevant fields explicitly.)
             synthesized = ManagedDataLakeDestinationConfig(
-                account_id="not-used-for-urn-only",  # SnowflakeConnectionConfig
-                database="not-used-for-urn-only",
-                log_schema="not-used-for-urn-only",
+                account_id="<unused-mdl-discovery-stub>",
+                database="<unused-mdl-discovery-stub>",
+                log_schema="<unused-mdl-discovery-stub>",
                 catalog_type="glue",
             )
             return self.build_destination_urn(
@@ -404,7 +426,11 @@ class FivetranSource(StatefulIngestionSourceBase):
                     destination_id
                 )
                 base = FivetranSource.apply_discovered_destination(base, discovered)
-            except Exception as e:
+            except (
+                requests.RequestException,
+                pydantic.ValidationError,
+                ValueError,
+            ) as e:
                 self.report.warning(
                     title="Destination discovery failed",
                     message=(
