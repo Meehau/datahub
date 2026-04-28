@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Iterable, List, Optional, Union
+from typing import ClassVar, Dict, Iterable, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 import datahub.emitter.mce_builder as builder
@@ -35,7 +35,10 @@ from datahub.ingestion.source.fivetran.config import (
 from datahub.ingestion.source.fivetran.data_classes import Connector, Job
 from datahub.ingestion.source.fivetran.fivetran_log_api import FivetranLogAPI
 from datahub.ingestion.source.fivetran.fivetran_rest_api import FivetranAPIClient
-from datahub.ingestion.source.fivetran.response_models import FivetranConnectionDetails
+from datahub.ingestion.source.fivetran.response_models import (
+    FivetranConnectionDetails,
+    FivetranDestinationDetails,
+)
 from datahub.ingestion.source.state.stale_entity_removal_handler import (
     StaleEntityRemovalHandler,
 )
@@ -80,6 +83,15 @@ class FivetranSource(StatefulIngestionSourceBase):
     config: FivetranSourceConfig
     report: FivetranSourceReport
     platform: str = "fivetran"
+
+    # Maps Fivetran destination `service` strings to:
+    #   (urn:li:dataPlatform value, attribute on FivetranDestinationConfig
+    #    holding the "database-like" identifier for relational URNs)
+    _RELATIONAL_SERVICE_MAP: ClassVar[Dict[str, Tuple[str, str]]] = {
+        "snowflake": ("snowflake", "database"),
+        "bigquery": ("bigquery", "project_id"),
+        "databricks": ("databricks", "catalog"),
+    }
 
     def __init__(self, config: FivetranSourceConfig, ctx: PipelineContext):
         super().__init__(config, ctx)
@@ -353,6 +365,44 @@ class FivetranSource(StatefulIngestionSourceBase):
             table_name=f"{destination_details.database.lower()}.{table_name}",
             env=destination_details.env,
             platform_instance=destination_details.platform_instance,
+        )
+
+    @staticmethod
+    def apply_discovered_destination(
+        base: PlatformDetail,
+        discovered: FivetranDestinationDetails,
+    ) -> PlatformDetail:
+        """Enrich `base` with fields derived from a REST-discovered destination.
+
+        Rules:
+        - Declarative fields on `base` always win (user override is authoritative).
+        - For relational services we know about, set `platform` and `database`
+          from the discovered config.
+        - For services we don't know about, return `base` unchanged. The caller
+          should log a structured warning so the user knows discovery didn't
+          help for that destination.
+        - The `managed_data_lake` service is handled in `build_destination_urn`
+          directly and is not routed through this relational mapper.
+        """
+        if discovered.service == "managed_data_lake":
+            # Caller's branch handles MDL — pass platform through but leave
+            # other fields alone; URN construction reads the discovered details.
+            return base.model_copy(
+                update={"platform": base.platform or "managed_data_lake"}
+            )
+
+        mapping = FivetranSource._RELATIONAL_SERVICE_MAP.get(discovered.service)
+        if mapping is None:
+            return base
+
+        platform, database_attr = mapping
+        discovered_database = getattr(discovered.config, database_attr, None)
+
+        return base.model_copy(
+            update={
+                "platform": base.platform or platform,
+                "database": base.database or discovered_database,
+            }
         )
 
     def _generate_dataflow_from_connector(self, connector: Connector) -> DataFlow:

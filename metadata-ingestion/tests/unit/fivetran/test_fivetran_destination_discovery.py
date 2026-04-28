@@ -8,9 +8,12 @@ import pytest
 from datahub.ingestion.source.fivetran.config import (
     FivetranAPIConfig,
     FivetranSourceConfig,
+    PlatformDetail,
 )
+from datahub.ingestion.source.fivetran.fivetran import FivetranSource
 from datahub.ingestion.source.fivetran.fivetran_rest_api import FivetranAPIClient
 from datahub.ingestion.source.fivetran.response_models import (
+    FivetranDestinationConfig,
     FivetranDestinationDetails,
 )
 
@@ -210,3 +213,65 @@ class TestUseDestinationDiscoveryFlag:
             }
         )
         assert cfg.use_destination_discovery is True
+
+
+def _details(service: str, **config_kwargs) -> FivetranDestinationDetails:
+    return FivetranDestinationDetails(
+        id="d",
+        service=service,
+        region="X",
+        group_id="g",
+        setup_status="CONNECTED",
+        config=FivetranDestinationConfig(**config_kwargs),
+    )
+
+
+class TestApplyDiscoveredDestination:
+    """`apply_discovered_destination` enriches a base PlatformDetail with
+    REST-discovered fields. Declarative fields on the base must always win
+    so that user overrides remain authoritative."""
+
+    def test_snowflake_service_sets_platform_and_database(self):
+        base = PlatformDetail()  # no overrides
+        result = FivetranSource.apply_discovered_destination(
+            base, _details("snowflake", database="DATAHUB_COMMUNITY")
+        )
+        assert result.platform == "snowflake"
+        assert result.database == "DATAHUB_COMMUNITY"
+
+    def test_bigquery_service_uses_project_id_as_database(self):
+        base = PlatformDetail()
+        result = FivetranSource.apply_discovered_destination(
+            base, _details("bigquery", project_id="my-bq-project")
+        )
+        assert result.platform == "bigquery"
+        assert result.database == "my-bq-project"
+
+    def test_databricks_service_uses_catalog_as_database(self):
+        base = PlatformDetail()
+        result = FivetranSource.apply_discovered_destination(
+            base, _details("databricks", catalog="main")
+        )
+        assert result.platform == "databricks"
+        assert result.database == "main"
+
+    def test_declarative_platform_wins_over_discovery(self):
+        # User said `platform="my_custom_warehouse"` on the override; we must
+        # not clobber it with the discovered service.
+        base = PlatformDetail(platform="my_custom_warehouse", database="X")
+        result = FivetranSource.apply_discovered_destination(
+            base, _details("snowflake", database="DATAHUB_COMMUNITY")
+        )
+        assert result.platform == "my_custom_warehouse"
+        assert result.database == "X"
+
+    def test_unknown_service_returns_base_unchanged(self):
+        # If Fivetran ships a new destination type we don't know about, the
+        # caller will use the base default. Surface a warning at the call
+        # site, but the helper itself is a pure function — no logging here.
+        base = PlatformDetail(platform="snowflake", database="WH")
+        result = FivetranSource.apply_discovered_destination(
+            base, _details("brand_new_destination_type")
+        )
+        assert result.platform == "snowflake"
+        assert result.database == "WH"
