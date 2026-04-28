@@ -265,7 +265,7 @@ project.ext.externalDependency = [
     'playCache': "org.playframework:play-cache_$playScalaVersion",
     'playCaffeineCache': "org.playframework:play-caffeine-cache_$playScalaVersion",
     'playWs': "org.playframework:play-ahc-ws_$playScalaVersion",
-    'playDocs': "org.playframework:play-docs_$playScalaVersion",
+    'playDocs': "org.playframework:play-docs_$playScalaVersion:$playVersion",
     'playGuice': "org.playframework:play-guice_$playScalaVersion",
     // Required at runtime for play.data.validation.Constraints (e.g. sign-up email validation);
     // compile-only transitives do not land in the staged Play distribution lib/.
