@@ -244,3 +244,36 @@ class TestGetConnectionSchemas:
             result = client.get_connection_schemas("conn_x")
         assert "public" in result.schemas
         assert "employee" in result.schemas["public"].tables
+
+
+class TestListUsers:
+    def test_paginates(self):
+        client = _make_client()
+
+        def _page(_url, **kwargs):
+            cursor = kwargs.get("params", {}).get("cursor")
+            r = MagicMock()
+            if cursor is None:
+                r.json.return_value = {
+                    "code": "Success",
+                    "data": {
+                        "items": [
+                            {"id": "u1", "email": "u1@x"},
+                        ],
+                        "next_cursor": "n",
+                    },
+                }
+            else:
+                r.json.return_value = {
+                    "code": "Success",
+                    "data": {
+                        "items": [{"id": "u2", "email": "u2@x"}],
+                        "next_cursor": None,
+                    },
+                }
+            r.raise_for_status = MagicMock()
+            return r
+
+        with patch.object(client._session, "get", side_effect=_page):
+            users = list(client.list_users(group_id="g"))
+        assert {u.id for u in users} == {"u1", "u2"}
