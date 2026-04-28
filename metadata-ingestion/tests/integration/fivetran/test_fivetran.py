@@ -23,6 +23,7 @@ from datahub.ingestion.source.fivetran.config import (
 from datahub.ingestion.source.fivetran.fivetran import FivetranSource
 from datahub.ingestion.source.fivetran.fivetran_log_api import FivetranLogAPI
 from datahub.ingestion.source.fivetran.fivetran_query import FivetranLogQuery
+from datahub.ingestion.source.fivetran.fivetran_rest_api import FivetranAPIClient
 from datahub.testing import mce_helpers
 
 FROZEN_TIME = "2022-06-07 17:00:00"
@@ -978,6 +979,139 @@ def test_fivetran_managed_data_lake_destination_config():
     # MDL defaults to `preserve_case=True` — case-preserving CLDs are the norm.
     assert mdl_dest.preserve_case is True
     assert mdl_dest.catalog_type == "glue"
+
+
+@time_machine.travel(FROZEN_TIME, tick=False)
+@pytest.mark.integration
+def test_fivetran_with_hybrid_destination_discovery(pytestconfig, tmp_path):
+    """End-to-end: Fivetran log lives in Snowflake; two destinations are in
+    use — one Snowflake, one Managed Data Lake. With
+    `use_destination_discovery: true`, the connector consults the Fivetran
+    REST API to determine each destination's `service` and emits Snowflake
+    URNs for the Snowflake-bound rows and Glue URNs for the MDL-bound rows
+    in a single ingestion pass.
+    """
+    test_resources_dir = pytestconfig.rootpath / "tests/integration/fivetran"
+    output_file = tmp_path / "fivetran_test_events.json"
+    golden_file = test_resources_dir / "fivetran_hybrid_discovery_golden.json"
+
+    # Custom connector list: postgres -> Snowflake destination,
+    # confluent_cloud -> MDL destination.
+    connector_query_results = [
+        {
+            "connection_id": "calendar_elected",
+            "connecting_user_id": "reapply_phone",
+            "connector_type_id": "postgres",
+            "connection_name": "postgres",
+            "paused": False,
+            "sync_frequency": 1440,
+            "destination_id": "snowflake_dest",
+        },
+        {
+            "connection_id": "my_confluent_cloud_connector_id",
+            "connecting_user_id": "reapply_phone",
+            "connector_type_id": "confluent_cloud",
+            "connection_name": "confluent_cloud",
+            "paused": False,
+            "sync_frequency": 1440,
+            "destination_id": "mdl_dest",
+        },
+    ]
+
+    def fake_destination_details(destination_id: str):
+        from datahub.ingestion.source.fivetran.response_models import (
+            FivetranDestinationConfig,
+            FivetranDestinationDetails,
+        )
+
+        if destination_id == "snowflake_dest":
+            return FivetranDestinationDetails(
+                id="snowflake_dest",
+                service="snowflake",
+                region="AWS_US_WEST_2",
+                group_id="g1",
+                setup_status="CONNECTED",
+                config=FivetranDestinationConfig(database="DATAHUB_COMMUNITY"),
+            )
+        if destination_id == "mdl_dest":
+            return FivetranDestinationDetails(
+                id="mdl_dest",
+                service="managed_data_lake",
+                region="AWS_US_WEST_2",
+                group_id="g2",
+                setup_status="CONNECTED",
+                config=FivetranDestinationConfig(bucket="datalake-bucket"),
+            )
+        raise AssertionError(f"unexpected destination_id={destination_id}")
+
+    with (
+        mock.patch(
+            "datahub.ingestion.source.fivetran.fivetran_log_api.create_engine"
+        ) as mock_create_engine,
+        mock.patch(
+            "datahub.ingestion.source.fivetran.fivetran_log_api.create_workspace_client"
+        ),
+        mock.patch.object(
+            FivetranAPIClient,
+            "get_destination_details_by_id",
+            side_effect=fake_destination_details,
+        ),
+    ):
+        connection_magic_mock = MagicMock()
+        connection_magic_mock.execute.side_effect = partial(
+            default_query_results,
+            connector_query_results=connector_query_results,
+        )
+        mock_create_engine.return_value = connection_magic_mock
+
+        pipeline = Pipeline.create(
+            {
+                "run_id": "fivetran-hybrid-test",
+                "source": {
+                    "type": "fivetran",
+                    "config": {
+                        "use_destination_discovery": True,
+                        "fivetran_log_config": {
+                            "destination_platform": "snowflake",
+                            "snowflake_destination_config": {
+                                "account_id": "testid",
+                                "warehouse": "test_wh",
+                                "username": "test",
+                                "password": "test@123",
+                                "role": "testrole",
+                                "database": "test_database",
+                                "log_schema": "test",
+                            },
+                        },
+                        "api_config": {
+                            "api_key": "k",
+                            "api_secret": "s",
+                        },
+                    },
+                },
+                "sink": {
+                    "type": "file",
+                    "config": {"filename": f"{output_file}"},
+                },
+            }
+        )
+
+        pipeline.run()
+        pipeline.raise_from_status()
+
+    output_text = output_file.read_text()
+    assert "urn:li:dataPlatform:snowflake," in output_text, (
+        "Snowflake destination should produce Snowflake URNs."
+    )
+    assert "urn:li:dataPlatform:glue,fivetran_" in output_text, (
+        "MDL destination should produce Glue URNs (default catalog_type)."
+    )
+
+    mce_helpers.check_golden_file(
+        pytestconfig,
+        output_path=f"{output_file}",
+        golden_path=f"{golden_file}",
+    )
 
 
 @time_machine.travel(FROZEN_TIME, tick=False)
