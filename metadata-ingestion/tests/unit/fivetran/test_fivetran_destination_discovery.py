@@ -1,8 +1,19 @@
 """Unit tests for REST-API destination discovery."""
 
+from unittest.mock import MagicMock, patch
+
+import pydantic
+import pytest
+
+from datahub.ingestion.source.fivetran.config import FivetranAPIConfig
+from datahub.ingestion.source.fivetran.fivetran_rest_api import FivetranAPIClient
 from datahub.ingestion.source.fivetran.response_models import (
     FivetranDestinationDetails,
 )
+
+
+def _make_client() -> FivetranAPIClient:
+    return FivetranAPIClient(FivetranAPIConfig(api_key="key", api_secret="secret"))
 
 
 class TestFivetranDestinationDetailsParsing:
@@ -65,3 +76,89 @@ class TestFivetranDestinationDetailsParsing:
             "some_new_field_added_by_fivetran": [1, 2, 3],
         }
         FivetranDestinationDetails.model_validate(raw)  # must not raise
+
+
+class TestGetDestinationDetailsByID:
+    """`get_destination_details_by_id` is the per-destination REST lookup.
+    Must: (1) parse the success envelope, (2) cache per id, (3) raise on
+    non-success codes so callers can decide whether to fall back."""
+
+    def test_success_response_parses_and_caches(self):
+        client = _make_client()
+        fake_resp = MagicMock()
+        fake_resp.json.return_value = {
+            "code": "Success",
+            "data": {
+                "id": "dest_1",
+                "service": "managed_data_lake",
+                "region": "AWS_US_EAST_1",
+                "group_id": "g",
+                "setup_status": "CONNECTED",
+                "config": {"bucket": "b"},
+            },
+        }
+        fake_resp.raise_for_status = MagicMock()
+
+        with patch.object(client._session, "get", return_value=fake_resp) as mocked:
+            first = client.get_destination_details_by_id("dest_1")
+            second = client.get_destination_details_by_id("dest_1")
+
+        assert first.service == "managed_data_lake"
+        assert first is second  # same cached instance
+        assert mocked.call_count == 1  # only one HTTP call
+
+    def test_distinct_ids_each_make_one_call(self):
+        client = _make_client()
+
+        def _resp(dest_id: str) -> MagicMock:
+            r = MagicMock()
+            r.json.return_value = {
+                "code": "Success",
+                "data": {
+                    "id": dest_id,
+                    "service": "snowflake",
+                    "region": "X",
+                    "group_id": "g",
+                    "setup_status": "CONNECTED",
+                    "config": {},
+                },
+            }
+            r.raise_for_status = MagicMock()
+            return r
+
+        with patch.object(
+            client._session,
+            "get",
+            side_effect=lambda url, **_: _resp(url.rsplit("/", 1)[-1]),
+        ) as mocked:
+            client.get_destination_details_by_id("a")
+            client.get_destination_details_by_id("b")
+            client.get_destination_details_by_id("a")  # cache hit
+
+        assert mocked.call_count == 2
+
+    def test_non_success_code_raises_value_error(self):
+        client = _make_client()
+        fake_resp = MagicMock()
+        fake_resp.json.return_value = {"code": "NotFound", "message": "no such id"}
+        fake_resp.raise_for_status = MagicMock()
+        with (
+            patch.object(client._session, "get", return_value=fake_resp),
+            pytest.raises(ValueError, match="NotFound"),
+        ):
+            client.get_destination_details_by_id("missing")
+
+    def test_invalid_payload_raises_validation_error(self):
+        client = _make_client()
+        fake_resp = MagicMock()
+        # Missing required field `id`.
+        fake_resp.json.return_value = {
+            "code": "Success",
+            "data": {"service": "snowflake", "region": "X", "config": {}},
+        }
+        fake_resp.raise_for_status = MagicMock()
+        with (
+            patch.object(client._session, "get", return_value=fake_resp),
+            pytest.raises(pydantic.ValidationError),
+        ):
+            client.get_destination_details_by_id("dest_x")

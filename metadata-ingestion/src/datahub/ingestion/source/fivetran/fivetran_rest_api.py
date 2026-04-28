@@ -1,4 +1,5 @@
 import logging
+from typing import Dict
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -9,6 +10,7 @@ from datahub.ingestion.source.fivetran.config import (
 )
 from datahub.ingestion.source.fivetran.response_models import (
     FivetranConnectionDetails,
+    FivetranDestinationDetails,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,6 +29,7 @@ class FivetranAPIClient:
     def __init__(self, config: FivetranAPIConfig) -> None:
         self.config = config
         self._session = self._create_session()
+        self._destination_cache: Dict[str, FivetranDestinationDetails] = {}
 
     def _create_session(self) -> requests.Session:
         """
@@ -104,3 +107,38 @@ class FivetranAPIClient:
         # Use Pydantic's built-in parsing with extra="ignore" configured in the model
         # ValidationError will propagate if required fields are missing
         return FivetranConnectionDetails(**data)
+
+    def get_destination_details_by_id(
+        self, destination_id: str
+    ) -> FivetranDestinationDetails:
+        """Fetch destination metadata from `GET /v1/destinations/{id}`.
+
+        Cached per instance so repeated lookups for the same destination during
+        a single ingest issue at most one HTTP call.
+
+        Raises:
+            requests.HTTPError: transport-level failure (after retries).
+            ValueError: API returned a non-Success code.
+            pydantic.ValidationError: response shape doesn't match expectations.
+        """
+        cached = self._destination_cache.get(destination_id)
+        if cached is not None:
+            return cached
+
+        response = self._session.get(
+            f"{self.config.base_url}/v1/destinations/{destination_id}",
+            timeout=self.config.request_timeout_sec,
+        )
+        response.raise_for_status()
+        payload = response.json()
+
+        code = payload.get("code")
+        if code != "Success":
+            raise ValueError(
+                f"Fivetran API returned non-success code {code!r} for "
+                f"destination {destination_id!r}: {payload.get('message')}"
+            )
+
+        details = FivetranDestinationDetails.model_validate(payload["data"])
+        self._destination_cache[destination_id] = details
+        return details
