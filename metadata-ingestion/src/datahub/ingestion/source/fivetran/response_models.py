@@ -1,5 +1,5 @@
 import datetime
-from typing import Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -127,3 +127,89 @@ class FivetranDestinationDetails(BaseModel):
     group_id: Optional[str] = None
     setup_status: Optional[str] = None
     config: FivetranDestinationConfig = FivetranDestinationConfig()
+
+
+class FivetranListedConnection(BaseModel):
+    """One row in `GET /v1/groups/{gid}/connections`."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    schema: str
+    service: str
+    paused: bool
+    sync_frequency: int
+    group_id: str
+    connected_by: Optional[str] = None
+
+
+class FivetranListConnectionsResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    items: List[FivetranListedConnection]
+    next_cursor: Optional[str] = None
+
+
+class FivetranColumn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    name_in_destination: str
+    enabled: bool = True
+    is_primary_key: bool = False
+
+
+class FivetranTable(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    name_in_destination: str
+    enabled: bool = True
+    columns: Dict[str, FivetranColumn] = {}
+
+
+class FivetranSchema(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    name_in_destination: str
+    enabled: bool = True
+    tables: Dict[str, FivetranTable] = {}
+
+
+class FivetranConnectionSchemas(BaseModel):
+    """`GET /v1/connections/{id}/schemas` — top-level `schemas` dict."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    schemas: Dict[str, FivetranSchema] = {}
+
+
+class FivetranListedUser(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    email: Optional[str] = None
+    given_name: Optional[str] = None
+    family_name: Optional[str] = None
+
+
+class FivetranListUsersResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    items: List[FivetranListedUser]
+    next_cursor: Optional[str] = None
+
+
+class FivetranSyncHistoryItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    sync_id: str
+    started_at: datetime.datetime
+    completed_at: Optional[datetime.datetime] = None
+    status: str
+    message: Optional[str] = None
+
+
+class FivetranSyncHistoryResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    items: List[FivetranSyncHistoryItem]
+    next_cursor: Optional[str] = None
