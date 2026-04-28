@@ -5,6 +5,7 @@ from unittest import mock
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 import time_machine
 
 from datahub.configuration.common import ConfigurationWarning
@@ -1222,3 +1223,180 @@ def test_compat_sources_to_database() -> None:
         "calendar_elected": PlatformDetail(env="DEV", database="my_db"),
         "connector_2": PlatformDetail(database="my_db_2"),
     }
+
+
+@time_machine.travel(FROZEN_TIME, tick=False)
+@pytest.mark.integration
+def test_fivetran_with_rest_api_log_source(pytestconfig, tmp_path):
+    """End-to-end test of `log_source: rest_api` mode.
+
+    No database engine setup — every read goes through the Fivetran REST
+    client, fully mocked here. Verifies that the REST reader produces
+    correct `Connector` data classes, lineage, and emits the expected
+    URNs without any SQL log database access.
+    """
+    from datahub.ingestion.source.fivetran.response_models import (
+        FivetranColumn,
+        FivetranConnectionSchemas,
+        FivetranListedConnection,
+        FivetranListedUser,
+        FivetranSchema,
+        FivetranTable,
+    )
+
+    test_resources_dir = pytestconfig.rootpath / "tests/integration/fivetran"
+    output_file = tmp_path / "fivetran_test_events.json"
+    golden_file = test_resources_dir / "fivetran_rest_only_golden.json"
+
+    # /v1/groups response — drives `_discover_group_ids` in the REST reader.
+    fake_groups_resp = MagicMock()
+    fake_groups_resp.json.return_value = {
+        "code": "Success",
+        "data": {"items": [{"id": "g1", "name": "Test Group"}]},
+    }
+    fake_groups_resp.raise_for_status = MagicMock()
+
+    def _fake_list_connections(self, group_id, page_size=100):
+        if group_id != "g1":
+            return iter([])
+        return iter(
+            [
+                FivetranListedConnection(
+                    id="postgres_test",
+                    schema="postgres_public",
+                    service="postgres",
+                    paused=False,
+                    sync_frequency=1440,
+                    group_id="g1",
+                    connected_by="user_a",
+                )
+            ]
+        )
+
+    def _fake_get_connection_schemas(self, connection_id):
+        if connection_id == "postgres_test":
+            return FivetranConnectionSchemas(
+                schemas={
+                    "public": FivetranSchema(
+                        name_in_destination="postgres_public",
+                        enabled=True,
+                        tables={
+                            "employee": FivetranTable(
+                                name_in_destination="employee",
+                                enabled=True,
+                                columns={
+                                    "id": FivetranColumn(
+                                        name_in_destination="id",
+                                        enabled=True,
+                                        is_primary_key=True,
+                                    ),
+                                    "name": FivetranColumn(
+                                        name_in_destination="name",
+                                        enabled=True,
+                                    ),
+                                },
+                            )
+                        },
+                    )
+                }
+            )
+        return FivetranConnectionSchemas()
+
+    def _fake_list_users(self, group_id, page_size=100):
+        if group_id != "g1":
+            return iter([])
+        return iter(
+            [
+                FivetranListedUser(
+                    id="user_a",
+                    email="user_a@example.com",
+                    given_name="User",
+                    family_name="A",
+                )
+            ]
+        )
+
+    def _fake_get_sync_history(self, connection_id, page_size=100):
+        return iter([])
+
+    with (
+        mock.patch.object(
+            FivetranAPIClient,
+            "list_connections",
+            autospec=True,
+            side_effect=_fake_list_connections,
+        ),
+        mock.patch.object(
+            FivetranAPIClient,
+            "get_connection_schemas",
+            autospec=True,
+            side_effect=_fake_get_connection_schemas,
+        ),
+        mock.patch.object(
+            FivetranAPIClient,
+            "list_users",
+            autospec=True,
+            side_effect=_fake_list_users,
+        ),
+        mock.patch.object(
+            FivetranAPIClient,
+            "get_sync_history",
+            autospec=True,
+            side_effect=_fake_get_sync_history,
+        ),
+        mock.patch.object(
+            requests.Session,
+            "get",
+            return_value=fake_groups_resp,
+        ),
+    ):
+        pipeline = Pipeline.create(
+            {
+                "run_id": "fivetran-rest-test",
+                "source": {
+                    "type": "fivetran",
+                    "config": {
+                        "log_source": "rest_api",
+                        "api_config": {"api_key": "k", "api_secret": "s"},
+                        # Required by config schema even in REST mode; not
+                        # used by the REST reader.
+                        "fivetran_log_config": {
+                            "destination_platform": "snowflake",
+                            "snowflake_destination_config": {
+                                "account_id": "x",
+                                "username": "u",
+                                "password": "p",
+                                "warehouse": "w",
+                                "database": "d",
+                                "log_schema": "s",
+                            },
+                        },
+                        "destination_to_platform_instance": {
+                            "g1": {
+                                "platform": "snowflake",
+                                "database": "TEST_DB",
+                                "env": "PROD",
+                            }
+                        },
+                    },
+                },
+                "sink": {
+                    "type": "file",
+                    "config": {"filename": f"{output_file}"},
+                },
+            }
+        )
+        pipeline.run()
+        pipeline.raise_from_status()
+
+    output_text = output_file.read_text()
+    # The destination URN should use the platform_instance override.
+    assert "urn:li:dataset:" in output_text
+    # Source URN: postgres-flavored
+    assert "urn:li:dataPlatform:postgres" in output_text
+
+    mce_helpers.check_golden_file(
+        pytestconfig,
+        output_path=f"{output_file}",
+        golden_path=f"{golden_file}",
+    )
