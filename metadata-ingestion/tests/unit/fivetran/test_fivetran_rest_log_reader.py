@@ -209,3 +209,38 @@ class TestListConnections:
             result = list(client.list_connections(group_id="g"))
         assert [c.id for c in result] == ["p1", "p2"]
         assert mocked.call_count == 2
+
+
+class TestGetConnectionSchemas:
+    def test_returns_parsed_schemas(self):
+        client = _make_client()
+        resp = MagicMock()
+        resp.json.return_value = {
+            "code": "Success",
+            "data": {
+                "schemas": {
+                    "public": {
+                        "name_in_destination": "postgres_public",
+                        "enabled": True,
+                        "tables": {
+                            "employee": {
+                                "name_in_destination": "employee",
+                                "enabled": True,
+                                "columns": {
+                                    "id": {
+                                        "name_in_destination": "id",
+                                        "enabled": True,
+                                        "is_primary_key": True,
+                                    }
+                                },
+                            }
+                        },
+                    }
+                }
+            },
+        }
+        resp.raise_for_status = MagicMock()
+        with patch.object(client._session, "get", return_value=resp):
+            result = client.get_connection_schemas("conn_x")
+        assert "public" in result.schemas
+        assert "employee" in result.schemas["public"].tables

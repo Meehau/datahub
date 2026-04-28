@@ -10,6 +10,7 @@ from datahub.ingestion.source.fivetran.config import (
 )
 from datahub.ingestion.source.fivetran.response_models import (
     FivetranConnectionDetails,
+    FivetranConnectionSchemas,
     FivetranDestinationDetails,
     FivetranListConnectionsResponse,
     FivetranListedConnection,
@@ -176,3 +177,18 @@ class FivetranAPIClient:
             cursor = page.next_cursor
             if cursor is None:
                 return
+
+    def get_connection_schemas(self, connection_id: str) -> FivetranConnectionSchemas:
+        resp = self._session.get(
+            f"{self.config.base_url}/v1/connections/{connection_id}/schemas",
+            timeout=self.config.request_timeout_sec,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        if payload.get("code") != "Success":
+            raise ValueError(
+                f"Fivetran API returned non-success code "
+                f"{payload.get('code')!r} for get_connection_schemas "
+                f"(connection_id={connection_id})"
+            )
+        return FivetranConnectionSchemas.model_validate(payload["data"])
