@@ -33,6 +33,17 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 
 class FivetranLogAPI:
+    """Database-based log reader.
+
+    Implements `FivetranLogReader`. Reads the Fivetran Platform Connector
+    log directly from the destination warehouse the log lands in.
+    """
+
+    # Surfaced at class level so the `FivetranLogReader` Protocol's
+    # structural check (`hasattr`) sees it before `__init__` runs.
+    # Always overwritten in `__init__` from the destination config.
+    fivetran_log_database: str = ""
+
     def __init__(self, fivetran_log_config: FivetranLogConfig) -> None:
         self.fivetran_log_config = fivetran_log_config
         (
@@ -357,7 +368,7 @@ class FivetranLogAPI:
             return {}
         return {user[Constant.USER_ID]: user[Constant.EMAIL] for user in users}
 
-    def get_user_email(self, user_id: str) -> Optional[str]:
+    def get_user_email(self, user_id: Optional[str]) -> Optional[str]:
         if not user_id:
             return None
         return self._get_users().get(user_id)
