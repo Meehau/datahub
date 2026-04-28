@@ -1,6 +1,13 @@
 source:
   type: fivetran
   config:
+    # Optional - When True, fetch each destination's `service` (managed_data_lake /
+    # snowflake / bigquery / databricks / ...) via the Fivetran REST API and route
+    # URN construction accordingly. Required for hybrid deployments where the
+    # Fivetran log lives in one destination but data is spread across multiple
+    # destinations of different types. Requires `api_config` to be set.
+    # use_destination_discovery: true
+
     # Fivetran log connector destination server configurations
     fivetran_log_config:
       destination_platform: snowflake

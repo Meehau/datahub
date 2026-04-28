@@ -124,6 +124,34 @@ managed_data_lake_destination_config:
 
 If you also ingest the same Iceberg/Polaris catalog with DataHub's [Iceberg source connector](https://docs.datahub.com/docs/generated/ingestion/sources/iceberg), set `platform_instance` on `destination_to_platform_instance` to match the Iceberg source recipe so URNs from both connectors refer to the same datasets and lineage renders end-to-end.
 
+#### Hybrid deployments and destination discovery
+
+If your Fivetran setup has a single account-level Fivetran Platform Connector delivering log data to one destination (typically Snowflake) but actual data is spread across destinations of different types (e.g., Snowflake for some connectors, Managed Data Lake for others), the per-recipe `destination_platform` field can only describe one destination's type at a time.
+
+Set `use_destination_discovery: true` to have the connector consult the [Fivetran REST API](https://fivetran.com/docs/rest-api/api-reference/destinations) for each destination's actual `service` and emit URNs accordingly:
+
+```yaml
+source:
+  type: fivetran
+  config:
+    use_destination_discovery: true # opt-in
+    fivetran_log_config:
+      destination_platform: snowflake # where the log lives
+      snowflake_destination_config:
+        # ... your Snowflake log destination details ...
+    api_config:
+      api_key: "${FIVETRAN_API_KEY}"
+      api_secret: "${FIVETRAN_API_SECRET}"
+```
+
+Discovery results are cached per-ingest, so each unique `destination_id` triggers at most one REST call.
+
+**Precedence:** declarative entries in `destination_to_platform_instance` always win over discovery — use them to override an inaccurate REST result or fix one destination without touching the rest.
+
+**Failures:** if the REST call fails for a destination, the connector logs a structured warning and falls back to the recipe's default `destination_platform`. The ingest does not abort. Set the override explicitly via `destination_to_platform_instance` to bypass discovery for that destination.
+
+**Limitations of REST discovery for Managed Data Lake:** for MDL destinations discovered via REST, the connector defaults to `catalog_type: glue`. If your MDL uses a non-Glue catalog (Iceberg REST / Polaris / Unity / BigLake), declare `managed_data_lake_destination_config` explicitly with the right `catalog_type` — discovery alone can't infer the catalog backing reliably.
+
 #### Fivetran REST API Configuration
 
 The Fivetran REST API configuration is **required** for Google Sheets connectors and optional for other use cases. It provides access to connection details that aren't available in the Platform Connector logs.
