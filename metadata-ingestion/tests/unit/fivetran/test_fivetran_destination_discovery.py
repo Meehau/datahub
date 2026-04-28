@@ -1,5 +1,6 @@
 """Unit tests for REST-API destination discovery."""
 
+from typing import Optional, cast
 from unittest.mock import MagicMock, patch
 
 import pydantic
@@ -275,3 +276,109 @@ class TestApplyDiscoveredDestination:
         )
         assert result.platform == "snowflake"
         assert result.database == "WH"
+
+
+def _make_source_with_discovery(
+    api_client: Optional[MagicMock] = None,
+    overrides: Optional[dict] = None,
+) -> FivetranSource:
+    """Build a FivetranSource without booting the log API (mocks the engine)."""
+    cfg = FivetranSourceConfig.model_validate(
+        {
+            "use_destination_discovery": True,
+            "fivetran_log_config": {
+                "destination_platform": "snowflake",
+                "snowflake_destination_config": {
+                    "account_id": "x",
+                    "username": "u",
+                    "password": "p",
+                    "warehouse": "w",
+                    "database": "d",
+                    "log_schema": "s",
+                },
+            },
+            "api_config": {"api_key": "k", "api_secret": "s"},
+            "destination_to_platform_instance": overrides or {},
+        }
+    )
+    # Bypass the FivetranLogAPI engine setup — we don't need it for this test.
+    src = FivetranSource.__new__(FivetranSource)
+    src.config = cfg
+    src.report = MagicMock()
+    src.audit_log = MagicMock()
+    src.audit_log.fivetran_log_database = "fivetran_log_db"
+    src.api_client = api_client
+    src._connection_details_cache = {}
+    return src
+
+
+class TestResolveDestinationDetails:
+    """`resolve_destination_details` is the new entry point that combines
+    declarative override + REST discovery into a single PlatformDetail."""
+
+    def test_declarative_override_skips_rest_call(self):
+        api_client = MagicMock()
+        src = _make_source_with_discovery(
+            api_client=api_client,
+            overrides={
+                "dest_a": {"platform": "snowflake", "database": "PROD"},
+            },
+        )
+        result = src.resolve_destination_details("dest_a")
+        assert result.platform == "snowflake"
+        assert result.database == "PROD"
+        api_client.get_destination_details_by_id.assert_not_called()
+
+    def test_rest_discovery_used_when_no_override(self):
+        api_client = MagicMock()
+        api_client.get_destination_details_by_id.return_value = (
+            FivetranDestinationDetails(
+                id="dest_b",
+                service="snowflake",
+                region="X",
+                group_id="g",
+                setup_status="CONNECTED",
+                config=FivetranDestinationConfig(database="DATAHUB_COMMUNITY"),
+            )
+        )
+        src = _make_source_with_discovery(api_client=api_client)
+        result = src.resolve_destination_details("dest_b")
+        assert result.platform == "snowflake"
+        assert result.database == "DATAHUB_COMMUNITY"
+        api_client.get_destination_details_by_id.assert_called_once_with("dest_b")
+
+    def test_rest_discovery_for_managed_data_lake(self):
+        api_client = MagicMock()
+        api_client.get_destination_details_by_id.return_value = (
+            FivetranDestinationDetails(
+                id="dest_c",
+                service="managed_data_lake",
+                region="AWS_US_WEST_2",
+                group_id="g",
+                setup_status="CONNECTED",
+                config=FivetranDestinationConfig(bucket="b"),
+            )
+        )
+        src = _make_source_with_discovery(api_client=api_client)
+        result = src.resolve_destination_details("dest_c")
+        assert result.platform == "managed_data_lake"
+
+    def test_rest_failure_emits_warning_and_falls_back_to_default(self):
+        api_client = MagicMock()
+        api_client.get_destination_details_by_id.side_effect = ValueError("boom")
+        src = _make_source_with_discovery(api_client=api_client)
+        result = src.resolve_destination_details("dest_d")
+        # Falls back to fivetran_log_config.destination_platform
+        assert result.platform == "snowflake"
+        # And the report records the warning. (`report` is a MagicMock —
+        # cast for mypy because the real type-annotation is the concrete report.)
+        report_mock = cast(MagicMock, src.report)
+        report_mock.warning.assert_called_once()
+
+    def test_discovery_disabled_skips_rest(self):
+        api_client = MagicMock()
+        src = _make_source_with_discovery(api_client=api_client)
+        src.config = src.config.model_copy(update={"use_destination_discovery": False})
+        result = src.resolve_destination_details("dest_e")
+        assert result.platform == "snowflake"  # default
+        api_client.get_destination_details_by_id.assert_not_called()

@@ -131,16 +131,9 @@ class FivetranSource(StatefulIngestionSourceBase):
                 )
                 source_details.platform = connector.connector_type
 
-        # Get platform details for destination
-        destination_details = self.config.destination_to_platform_instance.get(
-            connector.destination_id, PlatformDetail()
-        )
-        if destination_details.platform is None:
-            destination_details.platform = (
-                self.config.fivetran_log_config.destination_platform
-            )
-        if destination_details.database is None:
-            destination_details.database = self.audit_log.fivetran_log_database
+        # Get platform details for destination — declarative override + (optional)
+        # REST discovery, plus a default fallback.
+        destination_details = self.resolve_destination_details(connector.destination_id)
 
         if (
             len(connector.lineage)
@@ -260,10 +253,26 @@ class FivetranSource(StatefulIngestionSourceBase):
     def _build_destination_urn(
         self, destination_table: str, destination_details: PlatformDetail
     ) -> DatasetUrn:
+        declared_mdl = (
+            self.config.fivetran_log_config.managed_data_lake_destination_config
+        )
+        if destination_details.platform == "managed_data_lake" and declared_mdl is None:
+            # MDL discovered via REST without a declarative config block.
+            # Synthesize a Glue-defaulted ad-hoc MDL config; for non-Glue
+            # MDL backings users must declare `managed_data_lake_destination_config`
+            # explicitly because catalog_type can't be reliably inferred from
+            # REST without inspecting Fivetran's Glue/Unity toggle fields.
+            synthesized = ManagedDataLakeDestinationConfig(
+                account_id="not-used-for-urn-only",  # SnowflakeConnectionConfig
+                database="not-used-for-urn-only",
+                log_schema="not-used-for-urn-only",
+                catalog_type="glue",
+            )
+            return self.build_destination_urn(
+                destination_table, destination_details, synthesized
+            )
         return self.build_destination_urn(
-            destination_table,
-            destination_details,
-            self.config.fivetran_log_config.managed_data_lake_destination_config,
+            destination_table, destination_details, declared_mdl
         )
 
     @staticmethod
@@ -366,6 +375,60 @@ class FivetranSource(StatefulIngestionSourceBase):
             env=destination_details.env,
             platform_instance=destination_details.platform_instance,
         )
+
+    def resolve_destination_details(self, destination_id: str) -> PlatformDetail:
+        """Single source of truth for a destination's PlatformDetail.
+
+        Combines (in order of precedence):
+          1. Declarative override from `destination_to_platform_instance`.
+          2. REST-discovered details (if `use_destination_discovery` is on
+             and the API client is available).
+          3. The connector-level default `fivetran_log_config.destination_platform`.
+
+        Discovery failures emit a structured warning on `self.report` and fall
+        through to (3); they do not crash the ingest.
+        """
+        base = self.config.destination_to_platform_instance.get(
+            destination_id, PlatformDetail()
+        )
+
+        needs_discovery = (
+            self.config.use_destination_discovery
+            and self.api_client is not None
+            and base.platform is None
+        )
+        if needs_discovery:
+            try:
+                assert self.api_client is not None
+                discovered = self.api_client.get_destination_details_by_id(
+                    destination_id
+                )
+                base = FivetranSource.apply_discovered_destination(base, discovered)
+            except Exception as e:
+                self.report.warning(
+                    title="Destination discovery failed",
+                    message=(
+                        "Could not fetch destination details from the Fivetran "
+                        "REST API; falling back to the configured default "
+                        "destination_platform. Set "
+                        "`destination_to_platform_instance` to override "
+                        "explicitly for this destination."
+                    ),
+                    context=f"destination_id={destination_id}",
+                    exc=e,
+                )
+
+        if base.platform is None:
+            base = base.model_copy(
+                update={
+                    "platform": self.config.fivetran_log_config.destination_platform
+                }
+            )
+        if base.database is None:
+            base = base.model_copy(
+                update={"database": self.audit_log.fivetran_log_database}
+            )
+        return base
 
     @staticmethod
     def apply_discovered_destination(
