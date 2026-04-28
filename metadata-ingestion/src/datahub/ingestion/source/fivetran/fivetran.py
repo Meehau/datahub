@@ -264,9 +264,18 @@ class FivetranSource(StatefulIngestionSourceBase):
 
         For relational warehouses (snowflake/bigquery/databricks), emits a
         three-part `<database>.<schema>.<table>` URN. For the Fivetran Managed
-        Data Lake destination, emits a Glue URN where the Glue database name
-        is derived from the connector schema with the configured prefix
-        (default `fivetran_`).
+        Data Lake destination, the URN platform depends on `catalog_type`:
+
+        - `glue`: emits `urn:li:dataset:(glue, <prefix><schema>.<table>, env)`
+          where `<prefix>` defaults to `fivetran_` to match Fivetran's
+          auto-Glue-DB naming convention.
+        - `iceberg_rest` / `polaris`: emits
+          `urn:li:dataset:(iceberg, <schema>.<table>, env)`. The two values
+          are protocol-equivalent — Polaris is one server implementation of
+          the Iceberg REST Catalog protocol — so they share a single branch.
+          The namespace is the connector schema verbatim (no prefix), which
+          matches the convention used by DataHub's iceberg source connector
+          when ingesting the same Iceberg catalog directly.
         """
         if destination_details.platform == "managed_data_lake":
             if mdl_cfg is None:
@@ -274,34 +283,51 @@ class FivetranSource(StatefulIngestionSourceBase):
                     "managed_data_lake_destination_config is required when "
                     "destination_platform is 'managed_data_lake'."
                 )
-            # The config validator on `catalog_type` rejects unimplemented
-            # catalog types at recipe-load time, so by the time we're here the
-            # value is guaranteed to be `glue`. The Literal still accepts other
-            # values for forward compatibility.
-            if mdl_cfg.catalog_type != "glue":
-                raise NotImplementedError(
-                    f"managed_data_lake catalog_type={mdl_cfg.catalog_type!r} "
-                    "is not implemented yet."
+            if mdl_cfg.catalog_type == "glue":
+                # destination_table is "<schema>.<table>" — keep the schema
+                # part so we can derive the Glue database name.
+                # include_schema_in_urn is intentionally ignored here because
+                # the schema component is load-bearing (it determines the
+                # Glue DB), not just naming.
+                if "." not in destination_table:
+                    raise ValueError(
+                        "Expected destination_table in '<schema>.<table>' "
+                        f"form to derive the Glue database name; got "
+                        f"{destination_table!r} (no '.' separator). The Glue "
+                        "database is `<glue_database_prefix><schema>` so the "
+                        "schema component is required."
+                    )
+                schema, _, table = destination_table.partition(".")
+                glue_db = f"{mdl_cfg.glue_database_prefix}{schema}"
+                return DatasetUrn.create_from_ids(
+                    platform_id="glue",
+                    table_name=f"{glue_db}.{table}",
+                    env=destination_details.env,
+                    platform_instance=destination_details.platform_instance,
                 )
-            # destination_table is "<schema>.<table>" — keep the schema part
-            # so we can derive the Glue database name. include_schema_in_urn
-            # is intentionally ignored here because the schema component is
-            # load-bearing (it determines the Glue DB), not just naming.
-            if "." not in destination_table:
-                raise ValueError(
-                    "Expected destination_table in '<schema>.<table>' form to "
-                    "derive the Glue database name; got "
-                    f"{destination_table!r} (no '.' separator). The Glue "
-                    "database is `<glue_database_prefix><schema>` so the "
-                    "schema component is required."
+            if mdl_cfg.catalog_type in ("iceberg_rest", "polaris"):
+                if "." not in destination_table:
+                    raise ValueError(
+                        "Expected destination_table in '<schema>.<table>' "
+                        f"form to derive the Iceberg namespace; got "
+                        f"{destination_table!r} (no '.' separator)."
+                    )
+                schema, _, table = destination_table.partition(".")
+                # No prefix — the Iceberg REST Catalog (and Polaris) uses the
+                # connector schema as the namespace verbatim. Matches DataHub's
+                # iceberg-source convention so URNs align if the same catalog
+                # is also ingested directly.
+                return DatasetUrn.create_from_ids(
+                    platform_id="iceberg",
+                    table_name=f"{schema}.{table}",
+                    env=destination_details.env,
+                    platform_instance=destination_details.platform_instance,
                 )
-            schema, _, table = destination_table.partition(".")
-            glue_db = f"{mdl_cfg.glue_database_prefix}{schema}"
-            return DatasetUrn.create_from_ids(
-                platform_id="glue",
-                table_name=f"{glue_db}.{table}",
-                env=destination_details.env,
-                platform_instance=destination_details.platform_instance,
+            # Defensive guard — the config validator should have rejected this
+            # at recipe-load time. Reached only if validation was bypassed.
+            raise NotImplementedError(
+                f"managed_data_lake catalog_type={mdl_cfg.catalog_type!r} "
+                "is not implemented yet."
             )
 
         # Existing relational-warehouse path. Platform and database are

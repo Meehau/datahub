@@ -37,16 +37,26 @@ class TestManagedDataLakeConfigValidation:
         # preserve_case defaults to True for MDL because CLDs are case-preserving.
         assert cfg.preserve_case is True
 
+    @pytest.mark.parametrize("catalog_type", ["iceberg_rest", "polaris"])
+    def test_iceberg_rest_and_polaris_accepted(self, catalog_type):
+        # Both values are protocol-equivalent (Polaris implements the Iceberg
+        # REST Catalog spec) and route through the same URN-construction
+        # branch. Both must pass config validation.
+        cfg = _mdl_config(catalog_type=catalog_type)
+        assert cfg.catalog_type == catalog_type
+
     @pytest.mark.parametrize(
         "unimplemented_catalog_type",
-        ["iceberg_rest", "unity", "biglake", "onelake"],
+        ["unity", "biglake", "onelake"],
     )
-    def test_non_glue_catalog_rejected_at_config_load(self, unimplemented_catalog_type):
+    def test_non_implemented_catalog_rejected_at_config_load(
+        self, unimplemented_catalog_type
+    ):
         # The Literal accepts the value for forward compatibility, but the
-        # field validator rejects it at recipe-load time so the failure
-        # surfaces before any ingestion work runs (rather than mid-loop in
-        # URN construction). Match a stable substring rather than the full
-        # error wording.
+        # field validator rejects unimplemented catalogs at recipe-load time
+        # so the failure surfaces before any ingestion work runs (rather than
+        # mid-loop in URN construction). Match a stable substring rather than
+        # the full error wording.
         with pytest.raises(ValueError, match="catalog_type"):
             _mdl_config(catalog_type=unimplemented_catalog_type)
 
@@ -105,6 +115,54 @@ class TestManagedDataLakeUrnConstruction:
                 destination_details=details,
                 mdl_cfg=None,
             )
+
+    @pytest.mark.parametrize("catalog_type", ["iceberg_rest", "polaris"])
+    def test_iceberg_urn_uses_schema_and_table_with_no_prefix(self, catalog_type):
+        # Iceberg REST and Polaris are protocol-equivalent and both route
+        # through the same branch. URN platform is `iceberg` (DataHub's
+        # existing platform) and the namespace is the connector schema
+        # verbatim — no `fivetran_` prefix unlike the Glue catalog backing.
+        details = PlatformDetail(platform="managed_data_lake", env="PROD")
+        urn = FivetranSource.build_destination_urn(
+            destination_table="luma.event",
+            destination_details=details,
+            mdl_cfg=_mdl_config(catalog_type=catalog_type),
+        )
+        assert (
+            str(urn) == "urn:li:dataset:(urn:li:dataPlatform:iceberg,luma.event,PROD)"
+        )
+
+    @pytest.mark.parametrize("catalog_type", ["iceberg_rest", "polaris"])
+    def test_iceberg_unqualified_destination_table_raises(self, catalog_type):
+        # Same partition guard as the Glue branch: an unqualified table name
+        # would emit a malformed URN (empty table component), so fail loudly.
+        details = PlatformDetail(platform="managed_data_lake", env="PROD")
+        with pytest.raises(ValueError, match="namespace"):
+            FivetranSource.build_destination_urn(
+                destination_table="event",  # no '.' separator
+                destination_details=details,
+                mdl_cfg=_mdl_config(catalog_type=catalog_type),
+            )
+
+    @pytest.mark.parametrize("catalog_type", ["iceberg_rest", "polaris"])
+    def test_iceberg_urn_with_platform_instance(self, catalog_type):
+        # platform_instance must thread through so URNs align with what the
+        # DataHub iceberg source connector emits when ingesting the same
+        # Polaris/Iceberg-REST catalog directly.
+        details = PlatformDetail(
+            platform="managed_data_lake",
+            env="DEV",
+            platform_instance="polaris_us_west",
+        )
+        urn = FivetranSource.build_destination_urn(
+            destination_table="events.page_views",
+            destination_details=details,
+            mdl_cfg=_mdl_config(catalog_type=catalog_type),
+        )
+        assert (
+            str(urn)
+            == "urn:li:dataset:(urn:li:dataPlatform:iceberg,polaris_us_west.events.page_views,DEV)"
+        )
 
     def test_glue_urn_with_platform_instance(self):
         details = PlatformDetail(

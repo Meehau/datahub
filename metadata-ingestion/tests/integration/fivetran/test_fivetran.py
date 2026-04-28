@@ -861,6 +861,103 @@ def test_fivetran_with_managed_data_lake_dest(pytestconfig, tmp_path):
 
 
 @time_machine.travel(FROZEN_TIME, tick=False)
+@pytest.mark.integration
+@pytest.mark.parametrize("catalog_type", ["iceberg_rest", "polaris"])
+def test_fivetran_with_managed_data_lake_iceberg_rest_dest(
+    pytestconfig, tmp_path, catalog_type
+):
+    """End-to-end test for the Managed Data Lake destination with the
+    Iceberg REST Catalog backing (covers both `iceberg_rest` and `polaris`,
+    which are protocol-equivalent and route through the same branch).
+
+    Verifies that:
+      1. The Snowflake-engine path still applies (the log lives in a CLD).
+      2. The destination URN is an Iceberg URN of shape
+         `urn:li:dataset:(iceberg, <schema>.<table>, env)` — namespace is
+         the connector schema verbatim with no `fivetran_` prefix.
+    """
+    test_resources_dir = pytestconfig.rootpath / "tests/integration/fivetran"
+
+    output_file = tmp_path / "fivetran_test_events.json"
+    # Both catalog_type values must produce the same URN shape, so a single
+    # golden file is shared. Parametrization ensures both code paths are
+    # exercised even though the golden compare is identical.
+    golden_file = test_resources_dir / "fivetran_managed_data_lake_iceberg_golden.json"
+
+    with (
+        mock.patch(
+            "datahub.ingestion.source.fivetran.fivetran_log_api.create_engine"
+        ) as mock_create_engine,
+        mock.patch(
+            "datahub.ingestion.source.fivetran.fivetran_log_api.create_workspace_client"
+        ),
+    ):
+        connection_magic_mock = MagicMock()
+        connection_magic_mock.execute.side_effect = mdl_query_results
+        mock_create_engine.return_value = connection_magic_mock
+
+        pipeline = Pipeline.create(
+            {
+                "run_id": "fivetran-mdl-iceberg-test",
+                "source": {
+                    "type": "fivetran",
+                    "config": {
+                        "fivetran_log_config": {
+                            "destination_platform": "managed_data_lake",
+                            "managed_data_lake_destination_config": {
+                                "account_id": "testid",
+                                "warehouse": "test_wh",
+                                "username": "test",
+                                "password": "test@123",
+                                "role": "testrole",
+                                "database": "lh_source_fivetran_usw2",
+                                "log_schema": "fivetran_metadata_test",
+                                "catalog_type": catalog_type,
+                            },
+                        },
+                        "connector_patterns": {
+                            "allow": ["postgres", "confluent_cloud"]
+                        },
+                        "destination_patterns": {
+                            "allow": [
+                                "interval_unconstitutional",
+                                "my_confluent_cloud_connector_id",
+                            ]
+                        },
+                    },
+                },
+                "sink": {
+                    "type": "file",
+                    "config": {"filename": f"{output_file}"},
+                },
+            }
+        )
+
+    pipeline.run()
+    pipeline.raise_from_status()
+
+    # Belt-and-braces: pin that the emitted destination URNs are on the
+    # `iceberg` platform, not `glue`. Catches a regression where the branch
+    # dispatch flipped back to the Glue path.
+    output_text = output_file.read_text()
+    assert "urn:li:dataPlatform:iceberg," in output_text, (
+        "Expected at least one `urn:li:dataPlatform:iceberg,*` dataset "
+        "in the emitted MCEs — the Managed Data Lake destination with "
+        f"catalog_type={catalog_type!r} must emit Iceberg URNs."
+    )
+    assert "urn:li:dataPlatform:glue,fivetran_" not in output_text, (
+        "Did not expect Glue URNs — the iceberg_rest/polaris branch must "
+        "not fall through to the Glue code path."
+    )
+
+    mce_helpers.check_golden_file(
+        pytestconfig,
+        output_path=f"{output_file}",
+        golden_path=f"{golden_file}",
+    )
+
+
+@time_machine.travel(FROZEN_TIME, tick=False)
 def test_fivetran_managed_data_lake_destination_config():
     """The MDL destination config must reuse the SnowflakeConnectionConfig
     SQLAlchemy URL builder — the engine is Snowflake under the hood since

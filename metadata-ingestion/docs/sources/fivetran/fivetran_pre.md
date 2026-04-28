@@ -95,6 +95,35 @@ source:
 
 The destination URN points at the Glue table, not at the Snowflake CLD table that analysts query. The rendered lineage shows `<source> → <Glue Iceberg table>`; the corresponding Snowflake CLD table is ingested by the Snowflake source as a separate node.
 
+##### Iceberg REST Catalog and Apache Polaris (Snowflake Open Catalog)
+
+When the Managed Data Lake is configured without the AWS Glue or Databricks Unity Catalog toggles enabled, Fivetran writes Iceberg metadata to its default Iceberg REST Catalog. The same Iceberg metadata is readable by any Iceberg-REST-compatible catalog server — including [Apache Polaris](https://polaris.apache.org/) and its Snowflake-hosted variant [Snowflake Open Catalog](https://docs.snowflake.com/en/user-guide/tables-iceberg-open-catalog).
+
+Set `catalog_type: iceberg_rest` (protocol-layer name) or `catalog_type: polaris` (implementation-layer name) — both are accepted and produce identical URNs:
+
+```
+urn:li:dataset:(urn:li:dataPlatform:iceberg, <schema>.<table>, <env>)
+```
+
+The namespace is the Fivetran connector schema verbatim; there is no `fivetran_` prefix (unlike the Glue catalog backing).
+
+```yaml
+managed_data_lake_destination_config:
+  # Snowflake CLD coordinates — the Fivetran log still lives in a CLD
+  account_id: "abc48144"
+  warehouse: "COMPUTE_WH"
+  database: "lh_source_fivetran_usw2"
+  log_schema: "fivetran_metadata_<suffix>"
+  username: "${SNOWFLAKE_USER}"
+  password: "${SNOWFLAKE_PASS}"
+  role: "fivetran_log_reader"
+
+  # Iceberg REST Catalog (or Polaris) — both values are equivalent.
+  catalog_type: "polaris" # or "iceberg_rest"
+```
+
+If you also ingest the same Iceberg/Polaris catalog with DataHub's [Iceberg source connector](https://docs.datahub.com/docs/generated/ingestion/sources/iceberg), set `platform_instance` on `destination_to_platform_instance` to match the Iceberg source recipe so URNs from both connectors refer to the same datasets and lineage renders end-to-end.
+
 #### Fivetran REST API Configuration
 
 The Fivetran REST API configuration is **required** for Google Sheets connectors and optional for other use cases. It provides access to connection details that aren't available in the Platform Connector logs.

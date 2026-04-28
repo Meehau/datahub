@@ -1,7 +1,7 @@
 import dataclasses
 import logging
 import warnings
-from typing import Any, Dict, Optional
+from typing import Any, ClassVar, Dict, FrozenSet, Optional
 
 import pydantic
 from pydantic import Field, field_validator, model_validator
@@ -153,16 +153,19 @@ class ManagedDataLakeDestinationConfig(SnowflakeConnectionConfig):
             "Lake recipes because catalog-linked databases are case-preserving."
         ),
     )
-    catalog_type: Literal["glue", "iceberg_rest", "unity", "biglake", "onelake"] = (
-        Field(
-            default="glue",
-            description=(
-                "The cloud-native catalog backing the Fivetran Managed Data Lake "
-                "destination. Currently only `glue` is implemented; other values "
-                "are accepted by the type but rejected at config-load time until "
-                "those branches are wired up."
-            ),
-        )
+    catalog_type: Literal[
+        "glue", "iceberg_rest", "polaris", "unity", "biglake", "onelake"
+    ] = Field(
+        default="glue",
+        description=(
+            "The cloud-native catalog backing the Fivetran Managed Data Lake "
+            "destination. Currently `glue`, `iceberg_rest`, and `polaris` are "
+            "implemented (the latter two are protocol-equivalent — Polaris is "
+            "one server implementation of the Iceberg REST Catalog protocol). "
+            "Remaining values (`unity`, `biglake`, `onelake`) are accepted by "
+            "the type but rejected at config-load time until those branches "
+            "are wired up."
+        ),
     )
     glue_database_prefix: str = Field(
         default="fivetran_",
@@ -173,6 +176,18 @@ class ManagedDataLakeDestinationConfig(SnowflakeConnectionConfig):
         ),
     )
 
+    # Single source of truth for which catalog backings have URN-construction
+    # branches wired up. Adding a new catalog means: extend the Literal, add it
+    # here, add the branch in `build_destination_urn`. The validator below
+    # rejects everything outside this set at config-load time.
+    #
+    # `ClassVar` is required so pydantic treats this as a regular class
+    # attribute rather than a private model attribute (`ModelPrivateAttr`),
+    # which would not be iterable.
+    _IMPLEMENTED_CATALOG_TYPES: ClassVar[FrozenSet[str]] = frozenset(
+        {"glue", "iceberg_rest", "polaris"}
+    )
+
     @field_validator("catalog_type", mode="after")
     @classmethod
     def validate_catalog_type(cls, value: str) -> str:
@@ -180,10 +195,10 @@ class ManagedDataLakeDestinationConfig(SnowflakeConnectionConfig):
         # config-shape migration), but the URN-construction branches don't exist
         # yet. Reject at recipe load time so users see the failure before any
         # ingestion work runs, not partway through a connector loop.
-        if value != "glue":
+        if value not in cls._IMPLEMENTED_CATALOG_TYPES:
             raise ValueError(
                 f"`catalog_type='{value}'` is not implemented yet; "
-                "only `catalog_type='glue'` is currently supported."
+                f"supported values are {sorted(cls._IMPLEMENTED_CATALOG_TYPES)}."
             )
         return value
 
