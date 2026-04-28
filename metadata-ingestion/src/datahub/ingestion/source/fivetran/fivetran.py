@@ -29,6 +29,8 @@ from datahub.ingestion.api.workunit import MetadataWorkUnit
 from datahub.ingestion.source.common.subtypes import DatasetSubTypes
 from datahub.ingestion.source.fivetran.config import (
     KNOWN_DATA_PLATFORM_MAPPING,
+    MAX_JOBS_PER_CONNECTOR_DEFAULT,
+    MAX_TABLE_LINEAGE_PER_CONNECTOR_DEFAULT,
     Constant,
     FivetranSourceConfig,
     FivetranSourceReport,
@@ -115,6 +117,7 @@ class FivetranSource(StatefulIngestionSourceBase):
         if self.config.log_source == "rest_api":
             assert self.config.api_config is not None  # validated upstream
             return FivetranLogRestReader(self.config.api_config)
+        assert self.config.fivetran_log_config is not None  # validated upstream
         return FivetranLogAPI(self.config.fivetran_log_config)
 
     def _extend_lineage(self, connector: Connector, datajob: DataJob) -> Dict[str, str]:
@@ -148,14 +151,19 @@ class FivetranSource(StatefulIngestionSourceBase):
         # REST discovery, plus a default fallback.
         destination_details = self.resolve_destination_details(connector.destination_id)
 
-        if (
-            len(connector.lineage)
-            >= self.config.fivetran_log_config.max_table_lineage_per_connector
-        ):
+        # In rest_api mode, fivetran_log_config may be None — fall back to the
+        # default safety cap. In log_database mode the validator guarantees
+        # fivetran_log_config is set.
+        max_table_lineage = (
+            self.config.fivetran_log_config.max_table_lineage_per_connector
+            if self.config.fivetran_log_config is not None
+            else MAX_TABLE_LINEAGE_PER_CONNECTOR_DEFAULT
+        )
+        if len(connector.lineage) >= max_table_lineage:
             self.report.warning(
                 title="Table lineage truncated",
-                message=f"The connector had more than {self.config.fivetran_log_config.max_table_lineage_per_connector} table lineage entries. "
-                f"Only the most recent {self.config.fivetran_log_config.max_table_lineage_per_connector} entries were ingested.",
+                message=f"The connector had more than {max_table_lineage} table lineage entries. "
+                f"Only the most recent {max_table_lineage} entries were ingested.",
                 context=f"{connector.connector_name} (connector_id: {connector.connector_id})",
             )
 
@@ -278,8 +286,12 @@ class FivetranSource(StatefulIngestionSourceBase):
         `catalog_type` and `glue_database_prefix` as kwargs separately so that
         no synthesis is needed; that's deferred to a future PR.
         """
+        # In rest_api mode, fivetran_log_config may be None; treat that as
+        # "no declared MDL config" — discovery + synthesis paths still work.
         declared_mdl = (
             self.config.fivetran_log_config.managed_data_lake_destination_config
+            if self.config.fivetran_log_config is not None
+            else None
         )
         if destination_details.platform == "managed_data_lake" and declared_mdl is None:
             # MDL discovered via REST without a declarative config block.
@@ -454,7 +466,10 @@ class FivetranSource(StatefulIngestionSourceBase):
                     exc=e,
                 )
 
-        if base.platform is None:
+        if base.platform is None and self.config.fivetran_log_config is not None:
+            # In rest_api mode the log config (and therefore the default
+            # destination_platform) is absent; rely on REST discovery or an
+            # explicit `destination_to_platform_instance` override instead.
             base = base.model_copy(
                 update={
                     "platform": self.config.fivetran_log_config.destination_platform
@@ -779,14 +794,19 @@ class FivetranSource(StatefulIngestionSourceBase):
         yield datajob
 
         # Map Fivetran's job/sync history entity with Datahub's data process entity
-        if (
-            len(connector.jobs)
-            >= self.config.fivetran_log_config.max_jobs_per_connector
-        ):
+        # In rest_api mode, fivetran_log_config may be None — fall back to the
+        # default safety cap. In log_database mode the validator guarantees
+        # fivetran_log_config is set.
+        max_jobs = (
+            self.config.fivetran_log_config.max_jobs_per_connector
+            if self.config.fivetran_log_config is not None
+            else MAX_JOBS_PER_CONNECTOR_DEFAULT
+        )
+        if len(connector.jobs) >= max_jobs:
             self.report.warning(
                 title="Not all sync history was captured",
-                message=f"The connector had more than {self.config.fivetran_log_config.max_jobs_per_connector} sync runs in the past {self.config.history_sync_lookback_period} days. "
-                f"Only the most recent {self.config.fivetran_log_config.max_jobs_per_connector} syncs were ingested.",
+                message=f"The connector had more than {max_jobs} sync runs in the past {self.config.history_sync_lookback_period} days. "
+                f"Only the most recent {max_jobs} syncs were ingested.",
                 context=f"{connector.connector_name} (connector_id: {connector.connector_id})",
             )
         for job in connector.jobs:

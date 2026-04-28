@@ -75,3 +75,27 @@ def test_rest_api_mode_constructs_FivetranLogRestReader():
     )
     src = FivetranSource.create(cfg_dict, ctx=PipelineContext(run_id="x"))
     assert isinstance(src.audit_log, FivetranLogRestReader)
+
+
+class TestFivetranLogConfigOptionalInRestMode:
+    def test_rest_api_mode_does_not_require_fivetran_log_config(self):
+        # In rest_api mode, fivetran_log_config should be optional —
+        # the REST reader doesn't use it.
+        cfg = FivetranSourceConfig.model_validate(
+            {
+                "log_source": "rest_api",
+                "api_config": {"api_key": "k", "api_secret": "s"},
+            }
+        )
+        assert cfg.log_source == "rest_api"
+        assert cfg.fivetran_log_config is None
+
+    def test_log_database_mode_still_requires_fivetran_log_config(self):
+        # Default mode must still require a log config.
+        with pytest.raises(ValueError, match="fivetran_log_config"):
+            FivetranSourceConfig.model_validate(
+                {
+                    # log_source defaults to log_database
+                    "api_config": {"api_key": "k", "api_secret": "s"},
+                }
+            )

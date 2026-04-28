@@ -359,8 +359,13 @@ class PlatformDetail(ConfigModel):
 
 
 class FivetranSourceConfig(StatefulIngestionConfigBase, DatasetSourceConfigMixin):
-    fivetran_log_config: FivetranLogConfig = pydantic.Field(
-        description="Fivetran log connector destination server configurations.",
+    fivetran_log_config: Optional[FivetranLogConfig] = pydantic.Field(
+        default=None,
+        description=(
+            "Fivetran log destination configuration — required when "
+            "`log_source: log_database` (the default mode). Not used in "
+            "`log_source: rest_api` mode."
+        ),
     )
     connector_patterns: AllowDenyPattern = Field(
         default=AllowDenyPattern.allow_all(),
@@ -464,5 +469,15 @@ class FivetranSourceConfig(StatefulIngestionConfigBase, DatasetSourceConfigMixin
                     "log_source='rest_api' requires `api_config` (Fivetran API "
                     "key + secret) to be configured. The REST mode does not "
                     "use the destination database connection."
+                )
+        else:
+            # log_database mode — fivetran_log_config must be supplied
+            if self.fivetran_log_config is None:
+                raise ValueError(
+                    "log_source='log_database' requires `fivetran_log_config` "
+                    "describing the destination warehouse where the Fivetran "
+                    "Platform Connector log lives. To skip this and read logs "
+                    "via the Fivetran REST API instead, set "
+                    "`log_source: rest_api` and provide `api_config`."
                 )
         return self

@@ -1358,19 +1358,6 @@ def test_fivetran_with_rest_api_log_source(pytestconfig, tmp_path):
                     "config": {
                         "log_source": "rest_api",
                         "api_config": {"api_key": "k", "api_secret": "s"},
-                        # Required by config schema even in REST mode; not
-                        # used by the REST reader.
-                        "fivetran_log_config": {
-                            "destination_platform": "snowflake",
-                            "snowflake_destination_config": {
-                                "account_id": "x",
-                                "username": "u",
-                                "password": "p",
-                                "warehouse": "w",
-                                "database": "d",
-                                "log_schema": "s",
-                            },
-                        },
                         "destination_to_platform_instance": {
                             "g1": {
                                 "platform": "snowflake",
