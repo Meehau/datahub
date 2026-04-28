@@ -5,7 +5,10 @@ from unittest.mock import MagicMock, patch
 import pydantic
 import pytest
 
-from datahub.ingestion.source.fivetran.config import FivetranAPIConfig
+from datahub.ingestion.source.fivetran.config import (
+    FivetranAPIConfig,
+    FivetranSourceConfig,
+)
 from datahub.ingestion.source.fivetran.fivetran_rest_api import FivetranAPIClient
 from datahub.ingestion.source.fivetran.response_models import (
     FivetranDestinationDetails,
@@ -162,3 +165,48 @@ class TestGetDestinationDetailsByID:
             pytest.raises(pydantic.ValidationError),
         ):
             client.get_destination_details_by_id("dest_x")
+
+
+class TestUseDestinationDiscoveryFlag:
+    def test_defaults_to_false(self):
+        # Backwards-compat: the flag must default off so existing recipes
+        # don't change behaviour.
+        cfg = FivetranSourceConfig.model_validate(
+            {
+                "fivetran_log_config": {
+                    "destination_platform": "snowflake",
+                    "snowflake_destination_config": {
+                        "account_id": "x",
+                        "username": "u",
+                        "password": "p",
+                        "warehouse": "w",
+                        "database": "d",
+                        "log_schema": "s",
+                    },
+                },
+            }
+        )
+        assert cfg.use_destination_discovery is False
+
+    def test_can_enable(self):
+        cfg = FivetranSourceConfig.model_validate(
+            {
+                "use_destination_discovery": True,
+                "fivetran_log_config": {
+                    "destination_platform": "snowflake",
+                    "snowflake_destination_config": {
+                        "account_id": "x",
+                        "username": "u",
+                        "password": "p",
+                        "warehouse": "w",
+                        "database": "d",
+                        "log_schema": "s",
+                    },
+                },
+                "api_config": {
+                    "api_key": "k",
+                    "api_secret": "s",
+                },
+            }
+        )
+        assert cfg.use_destination_discovery is True

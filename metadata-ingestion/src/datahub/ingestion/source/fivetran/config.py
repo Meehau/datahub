@@ -376,6 +376,18 @@ class FivetranSourceConfig(StatefulIngestionConfigBase, DatasetSourceConfigMixin
         default=True,
         description="Populates table->table column lineage.",
     )
+    use_destination_discovery: bool = pydantic.Field(
+        default=False,
+        description=(
+            "When True, fetch each destination's `service` (managed_data_lake / "
+            "snowflake / bigquery / databricks / ...) via the Fivetran REST API "
+            "and route URN construction accordingly. Required for hybrid "
+            "deployments where the Fivetran log lives in one destination but "
+            "data is split across destinations of different types. Requires "
+            "`api_config` to be configured. Per-destination overrides supplied "
+            "via `destination_to_platform_instance` always win on conflict."
+        ),
+    )
 
     # Configuration for stateful ingestion
     stateful_ingestion: Optional[StatefulStaleMetadataRemovalConfig] = pydantic.Field(
