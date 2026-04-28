@@ -16,6 +16,8 @@ from datahub.ingestion.source.fivetran.response_models import (
     FivetranListedConnection,
     FivetranListedUser,
     FivetranListUsersResponse,
+    FivetranSyncHistoryItem,
+    FivetranSyncHistoryResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -213,6 +215,29 @@ class FivetranAPIClient:
             if payload.get("code") != "Success":
                 raise ValueError(f"Fivetran API non-success: {payload.get('code')!r}")
             page = FivetranListUsersResponse.model_validate(payload["data"])
+            yield from page.items
+            cursor = page.next_cursor
+            if cursor is None:
+                return
+
+    def get_sync_history(
+        self, connection_id: str, page_size: int = 100
+    ) -> Iterator[FivetranSyncHistoryItem]:
+        cursor: Optional[str] = None
+        while True:
+            params: Dict[str, object] = {"limit": page_size}
+            if cursor is not None:
+                params["cursor"] = cursor
+            resp = self._session.get(
+                f"{self.config.base_url}/v1/connections/{connection_id}/sync_history",
+                params=params,
+                timeout=self.config.request_timeout_sec,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            if payload.get("code") != "Success":
+                raise ValueError(f"Fivetran API non-success: {payload.get('code')!r}")
+            page = FivetranSyncHistoryResponse.model_validate(payload["data"])
             yield from page.items
             cursor = page.next_cursor
             if cursor is None:

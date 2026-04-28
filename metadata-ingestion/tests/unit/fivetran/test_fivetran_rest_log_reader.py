@@ -277,3 +277,35 @@ class TestListUsers:
         with patch.object(client._session, "get", side_effect=_page):
             users = list(client.list_users(group_id="g"))
         assert {u.id for u in users} == {"u1", "u2"}
+
+
+class TestGetSyncHistory:
+    def test_paginated(self):
+        client = _make_client()
+
+        def _page(_url, **kwargs):
+            cursor = kwargs.get("params", {}).get("cursor")
+            r = MagicMock()
+            if cursor is None:
+                r.json.return_value = {
+                    "code": "Success",
+                    "data": {
+                        "items": [
+                            {
+                                "sync_id": "s1",
+                                "started_at": "2023-09-20T06:37:32.606Z",
+                                "completed_at": "2023-09-20T06:38:05.056Z",
+                                "status": "SUCCESSFUL",
+                                "message": "{}",
+                            }
+                        ],
+                        "next_cursor": None,
+                    },
+                }
+            r.raise_for_status = MagicMock()
+            return r
+
+        with patch.object(client._session, "get", side_effect=_page):
+            items = list(client.get_sync_history("c1"))
+        assert items[0].sync_id == "s1"
+        assert items[0].status == "SUCCESSFUL"
