@@ -7,13 +7,24 @@ them from `tests/unit/fivetran/fixtures/` if your fixtures get large.
 
 from unittest.mock import MagicMock, patch
 
-from datahub.ingestion.source.fivetran.config import FivetranAPIConfig
+from datahub.configuration.common import AllowDenyPattern
+from datahub.ingestion.source.fivetran.config import (
+    FivetranAPIConfig,
+    FivetranSourceReport,
+)
+from datahub.ingestion.source.fivetran.fivetran_log_rest_reader import (
+    FivetranLogRestReader,
+)
 from datahub.ingestion.source.fivetran.fivetran_rest_api import FivetranAPIClient
 from datahub.ingestion.source.fivetran.response_models import (
+    FivetranColumn,
     FivetranConnectionSchemas,
     FivetranListConnectionsResponse,
+    FivetranListedConnection,
     FivetranListUsersResponse,
+    FivetranSchema,
     FivetranSyncHistoryResponse,
+    FivetranTable,
 )
 
 
@@ -309,3 +320,155 @@ class TestGetSyncHistory:
             items = list(client.get_sync_history("c1"))
         assert items[0].sync_id == "s1"
         assert items[0].status == "SUCCESSFUL"
+
+
+def _make_reader(api_client):
+    reader = FivetranLogRestReader.__new__(FivetranLogRestReader)
+    reader.api_client = api_client
+    reader._user_email_cache = {}
+    reader._group_ids = ["g1"]  # populated in __init__ in real construction
+    return reader
+
+
+class TestGetAllowedConnectorsListRest:
+    def test_assembles_connector_with_table_lineage_from_schemas(self):
+        api = MagicMock()
+        api.list_connections.return_value = iter(
+            [
+                FivetranListedConnection(
+                    id="c1",
+                    schema="postgres_public",
+                    service="postgres",
+                    paused=False,
+                    sync_frequency=1440,
+                    group_id="g1",
+                    connected_by="u1",
+                )
+            ]
+        )
+        api.get_connection_schemas.return_value = FivetranConnectionSchemas(
+            schemas={
+                "public": FivetranSchema(
+                    name_in_destination="postgres_public",
+                    enabled=True,
+                    tables={
+                        "employee": FivetranTable(
+                            name_in_destination="employee",
+                            enabled=True,
+                            columns={
+                                "id": FivetranColumn(
+                                    name_in_destination="id",
+                                    enabled=True,
+                                    is_primary_key=True,
+                                )
+                            },
+                        )
+                    },
+                )
+            }
+        )
+        api.get_sync_history.return_value = iter([])
+
+        reader = _make_reader(api)
+
+        connectors = reader.get_allowed_connectors_list(
+            connector_patterns=AllowDenyPattern.allow_all(),
+            destination_patterns=AllowDenyPattern.allow_all(),
+            report=FivetranSourceReport(),
+            syncs_interval=7,
+        )
+
+        assert len(connectors) == 1
+        c = connectors[0]
+        assert c.connector_id == "c1"
+        assert c.connector_type == "postgres"
+        # Table lineage flattened from schemas:
+        assert len(c.lineage) == 1
+        tl = c.lineage[0]
+        assert tl.source_table == "public.employee"
+        assert tl.destination_table == "postgres_public.employee"
+        # Column lineage:
+        assert len(tl.column_lineage) == 1
+        cl = tl.column_lineage[0]
+        assert cl.source_column == "id"
+        assert cl.destination_column == "id"
+
+    def test_filters_disabled_schemas_and_tables(self):
+        # Disabled schemas/tables/columns must not appear in the lineage.
+        api = MagicMock()
+        api.list_connections.return_value = iter(
+            [
+                FivetranListedConnection(
+                    id="c1",
+                    schema="x",
+                    service="postgres",
+                    paused=False,
+                    sync_frequency=1,
+                    group_id="g1",
+                )
+            ]
+        )
+        api.get_connection_schemas.return_value = FivetranConnectionSchemas(
+            schemas={
+                "public": FivetranSchema(
+                    name_in_destination="public",
+                    enabled=False,  # disabled
+                    tables={"t": FivetranTable(name_in_destination="t")},
+                ),
+                "ok": FivetranSchema(
+                    name_in_destination="ok",
+                    enabled=True,
+                    tables={
+                        "disabled_t": FivetranTable(
+                            name_in_destination="disabled_t", enabled=False
+                        ),
+                        "ok_t": FivetranTable(name_in_destination="ok_t"),
+                    },
+                ),
+            }
+        )
+        api.get_sync_history.return_value = iter([])
+
+        reader = _make_reader(api)
+        connectors = reader.get_allowed_connectors_list(
+            connector_patterns=AllowDenyPattern.allow_all(),
+            destination_patterns=AllowDenyPattern.allow_all(),
+            report=FivetranSourceReport(),
+            syncs_interval=7,
+        )
+        c = connectors[0]
+        # Only the enabled schema's enabled table is present
+        assert {tl.source_table for tl in c.lineage} == {"ok.ok_t"}
+
+    def test_connector_filter_drops_excluded(self):
+        api = MagicMock()
+        api.list_connections.return_value = iter(
+            [
+                FivetranListedConnection(
+                    id="keep",
+                    schema="s",
+                    service="postgres",
+                    paused=False,
+                    sync_frequency=1,
+                    group_id="g1",
+                ),
+                FivetranListedConnection(
+                    id="drop",
+                    schema="s",
+                    service="postgres",
+                    paused=False,
+                    sync_frequency=1,
+                    group_id="g1",
+                ),
+            ]
+        )
+        api.get_connection_schemas.return_value = FivetranConnectionSchemas()
+        api.get_sync_history.return_value = iter([])
+        reader = _make_reader(api)
+        connectors = reader.get_allowed_connectors_list(
+            connector_patterns=AllowDenyPattern(allow=["keep"]),
+            destination_patterns=AllowDenyPattern.allow_all(),
+            report=FivetranSourceReport(),
+            syncs_interval=7,
+        )
+        assert {c.connector_id for c in connectors} == {"keep"}
